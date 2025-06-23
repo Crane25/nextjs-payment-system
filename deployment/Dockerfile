@@ -33,8 +33,8 @@ WORKDIR /app
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
 
-# Install security updates
-RUN apk update && apk upgrade && apk add --no-cache dumb-init
+# Install security updates and required tools
+RUN apk update && apk upgrade && apk add --no-cache dumb-init wget curl
 
 # Copy built application
 COPY --from=builder /app/public ./public
@@ -59,7 +59,7 @@ USER nextjs
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD curl -f http://localhost:3000/api/health || exit 1
+  CMD wget --no-verbose --tries=1 --spider http://localhost:3000/api/health || exit 1
 
 # Expose port
 EXPOSE 3000

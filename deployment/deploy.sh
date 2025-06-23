@@ -40,11 +40,57 @@ if [ ! -f "docker-compose.yml" ]; then
     exit 1
 fi
 
-# Check if .env.local exists
+# Check if .env.local exists, create if missing
 if [ ! -f "../Frontend/.env.local" ]; then
-    print_error ".env.local file not found in Frontend directory"
-    print_status "Please ensure environment variables are configured"
-    exit 1
+    print_warning ".env.local file not found. Creating from template..."
+    
+    cat > ../Frontend/.env.local << 'EOF'
+# ===================================
+# Production Environment Configuration
+# Next.js Payment System v2.0
+# ===================================
+
+NODE_ENV=production
+NEXT_PUBLIC_APP_ENV=production
+NEXT_PUBLIC_APP_VERSION=2.0.0
+NEXT_PUBLIC_DOMAIN=scjsnext.com
+
+# Firebase Configuration
+NEXT_PUBLIC_FIREBASE_API_KEY=AIzaSyAvEe6PF9mnwN8Vqf9wqWUkWA58coXKpiA
+NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=paymentnew-dae57.firebaseapp.com
+NEXT_PUBLIC_FIREBASE_PROJECT_ID=paymentnew-dae57
+NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=paymentnew-dae57.firebasestorage.app
+NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=1074850368558
+NEXT_PUBLIC_FIREBASE_APP_ID=1:1074850368558:web:f7c3c3f162dfc8af1fa3bf
+
+# Security Configuration (Production)
+SESSION_SECRET=4a8f2e9c1b7d6e3f5a8b2c9d1e4f7a0b3c6d9e2f5a8b1c4d7e0f3a6b9c2e5f8a1b4d7e0f3a6b
+CSRF_SECRET=9d2e5f8a1b4d7e0f3a6b9c2e5f8a1b4d7e0f3a6b9c2e5f8a1b4d7e0f3a6b9c2e5f8a1b4d7e0f
+ENCRYPTION_KEY=06b259db817f41fbb73ac82a252a3b30
+HASH_SALT=dae13683bf304cfb90c3c97b649131aa
+
+# Security Settings
+SECURITY_HEADERS_ENABLED=true
+RATE_LIMIT_MAX_REQUESTS=100
+RATE_LIMIT_WINDOW_MS=900000
+FORCE_HTTPS=false
+SECURE_COOKIES=true
+CLOUDFLARE_SSL=true
+
+# Debug Configuration (Production)
+NEXT_PUBLIC_DEBUG_ENABLED=false
+NEXT_PUBLIC_LOG_LEVEL=error
+NEXT_PUBLIC_SHOW_ERROR_DETAILS=false
+
+# Feature Flags
+NEXT_PUBLIC_ENABLE_WITHDRAWALS=true
+NEXT_PUBLIC_ENABLE_MULTI_TEAM=true
+NEXT_PUBLIC_ENABLE_NOTIFICATIONS=true
+NEXT_PUBLIC_ENABLE_ANALYTICS=true
+NEXT_PUBLIC_MAINTENANCE_MODE=false
+EOF
+    
+    print_status "✅ .env.local file created with production settings"
 fi
 
 # Cloudflare setup instructions
