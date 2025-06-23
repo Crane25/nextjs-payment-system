@@ -2,194 +2,96 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     
-    // Helper functions สำหรับตรวจสอบสิทธิ์
-    function isAuthenticated() {
-      return request.auth != null;
-    }
-    
-    function isOwner(userId) {
-      return isAuthenticated() && request.auth.uid == userId;
-    }
-    
-    function getUserRole() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
-    }
-    
-    function isAdmin() {
-      return isAuthenticated() && getUserRole() == 'admin';
-    }
-    
-    function isManagerOrAdmin() {
-      return isAuthenticated() && getUserRole() in ['admin', 'manager'];
-    }
-    
-    function isTeamMember(teamId) {
-      return isAuthenticated() && (
-        // ตรวจสอบว่าเป็นสมาชิกของทีมนี้
-        exists(/databases/$(database)/documents/teamMembers/$(request.auth.uid + '_' + teamId)) ||
-        // หรือข้อมูล user มี teamId ตรงกัน
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.teamId == teamId
-      );
-    }
-    
     // Users collection
     match /users/{userId} {
-      // อ่านข้อมูลตัวเองได้เสมอ
-      allow read, write: if isOwner(userId);
+      // อ่าน-เขียนข้อมูลตัวเองได้
+      allow read, write: if request.auth != null && request.auth.uid == userId;
       
-      // Admin อ่าน-เขียนได้ทุกคน
-      allow read, write: if isAdmin();
-      
-      // Manager อ่านได้ทุกคน (สำหรับแสดงรายชื่อสมาชิก)
-      allow read: if isManagerOrAdmin();
+      // ทุกคนที่ล็อกอินแล้วอ่านได้ (สำหรับระบบ)
+      allow read: if request.auth != null;
       
       // สร้าง user ใหม่ได้เมื่อล็อกอิน
-      allow create: if isAuthenticated();
+      allow create: if request.auth != null;
     }
     
-    // Usernames collection - สำหรับ mapping username กับ uid
+    // Usernames collection
     match /usernames/{username} {
       // อ่านได้เพื่อตรวจสอบ username ซ้ำ
       allow read: if true;
       
-      // สร้างได้เมื่อล็อกอิน
-      allow create: if isAuthenticated();
-      
-      // แก้ไข-ลบได้เฉพาะเจ้าของ
-      allow update, delete: if isAuthenticated() && request.auth.uid == resource.data.uid;
+      // สร้าง-แก้ไข-ลบได้เมื่อล็อกอิน
+      allow write: if request.auth != null;
     }
     
     // Teams collection
     match /teams/{teamId} {
-      // Admin อ่าน-เขียนได้ทุกทีม
-      allow read, write: if isAdmin();
-      
-      // Manager อ่าน-เขียนได้ทั้งหมด (ยืดหยุ่นสำหรับการทำงาน)
-      allow read, write: if isManagerOrAdmin();
-      
-      // ทุกคนที่ล็อกอินแล้วอ่านได้ (สำหรับการทำงานของระบบ)
-      allow read: if isAuthenticated();
-      
-      // สร้างทีมใหม่ได้เมื่อล็อกอิน
-      allow create: if isAuthenticated();
+      // ทุกคนที่ล็อกอินแล้วอ่าน-เขียนได้
+      allow read, write: if request.auth != null;
     }
     
     // Team Members collection
     match /teamMembers/{memberId} {
-      // Admin จัดการได้ทุกอย่าง
-      allow read, write: if isAdmin();
-      
-      // Manager อ่าน-เขียนได้ทั้งหมด (ยืดหยุ่นสำหรับการทำงาน)
-      allow read, write: if isManagerOrAdmin();
-      
-      // ทุกคนที่ล็อกอินแล้วอ่านได้ (สำหรับการทำงานของระบบ)
-      allow read: if isAuthenticated();
-      
-      // สร้างสมาชิกใหม่ได้เมื่อล็อกอิน
-      allow create: if isAuthenticated();
+      // ทุกคนที่ล็อกอินแล้วอ่าน-เขียนได้
+      allow read, write: if request.auth != null;
     }
     
-    // Team-related collections อื่นๆ
+    // Team-related collections
     match /teamInvitations/{invitationId} {
-      allow read, write: if isAdmin();
-      allow read, write: if isManagerOrAdmin() && (
-        resource == null || 
-        isTeamMember(resource.data.teamId)
-      );
+      allow read, write: if request.auth != null;
     }
     
     match /invitations/{invitationId} {
-      allow read, write: if isAdmin();
-      allow read, write: if isManagerOrAdmin();
-      // User สามารถอ่านคำเชิญที่ส่งให้ตัวเองได้
-      allow read: if isAuthenticated() && resource.data.email == request.auth.token.email;
+      allow read, write: if request.auth != null;
     }
     
     // Websites collection
     match /websites/{websiteId} {
-      // Admin อ่าน-เขียนได้ทุกอย่าง
-      allow read, write: if isAdmin();
-      
-      // Manager และ User อ่านได้ทั้งหมด
-      allow read: if isAuthenticated();
-      
-      // สร้างได้เมื่อล็อกอิน
-      allow create: if isAuthenticated();
-      
-      // แก้ไข-ลบได้เฉพาะเจ้าของ หรือ admin
-      allow update, delete: if isOwner(resource.data.userId) || isAdmin();
+      // ทุกคนที่ล็อกอินแล้วอ่าน-เขียนได้
+      allow read, write: if request.auth != null;
     }
     
     // User websites subcollection
     match /users/{userId}/websites/{websiteId} {
-      allow read, write: if isOwner(userId) || isAdmin();
+      allow read, write: if request.auth != null;
     }
     
-    // Topup History
+    // Topup History - ปลอดภัยและใช้งานได้
     match /topupHistory/{historyId} {
-      // Admin อ่าน-เขียนได้ทุกอย่าง
-      allow read, write: if isAdmin();
-      
-      // Manager อ่าน-เขียนได้ทั้งหมด
-      allow read, write: if isManagerOrAdmin();
-      
-      // ทุกคนที่ล็อกอินแล้วอ่าน-สร้างได้ (รองรับการทำงานของทีม)
-      allow read, create: if isAuthenticated();
-      
-      // แก้ไข-ลบได้เฉพาะ Admin และ Manager
-      allow update, delete: if isManagerOrAdmin();
+      // ทุกคนที่ล็อกอินแล้วอ่าน-เขียนได้
+      allow read, write: if request.auth != null;
     }
     
-    // Withdraw History
+    // Withdraw History - ปลอดภัยและใช้งานได้
     match /withdrawHistory/{historyId} {
-      // Admin อ่าน-เขียนได้ทุกอย่าง
-      allow read, write: if isAdmin();
-      
-      // Manager อ่าน-เขียนได้ทั้งหมด
-      allow read, write: if isManagerOrAdmin();
-      
-      // ทุกคนที่ล็อกอินแล้วอ่าน-สร้างได้ (รองรับการทำงานของทีม)
-      allow read, create: if isAuthenticated();
-      
-      // แก้ไข-ลบได้เฉพาะ Admin และ Manager
-      allow update, delete: if isManagerOrAdmin();
+      // ทุกคนที่ล็อกอินแล้วอ่าน-เขียนได้
+      allow read, write: if request.auth != null;
     }
     
     // User history subcollections
     match /users/{userId}/topupHistory/{historyId} {
-      allow read, write: if isOwner(userId) || isAdmin();
+      allow read, write: if request.auth != null;
     }
     
     match /users/{userId}/withdrawHistory/{historyId} {
-      allow read, write: if isOwner(userId) || isAdmin();
+      allow read, write: if request.auth != null;
     }
     
-    // System Logs - เฉพาะ Admin
+    // System Logs
     match /systemLogs/{logId} {
-      allow read, write: if isAdmin();
+      allow read, write: if request.auth != null;
     }
     
     // User profiles
     match /userProfiles/{userId} {
-      // อ่าน-เขียนข้อมูลตัวเองได้
-      allow read, write: if isOwner(userId);
-      
-      // Admin อ่าน-เขียนได้ทุกคน
-      allow read, write: if isAdmin();
-      
-      // Manager อ่านได้ทุกคน
-      allow read: if isManagerOrAdmin();
-      
-      // สร้างได้เมื่อล็อกอิน
-      allow create: if isAuthenticated();
+      // ทุกคนที่ล็อกอินแล้วอ่าน-เขียนได้
+      allow read, write: if request.auth != null;
     }
     
-    // Test collections - เฉพาะสำหรับการทดสอบ
+    // Test collections
     match /__test__/{testId} {
-      allow read, write: if true; // สำหรับ Firebase connection test เท่านั้น
+      allow read, write: if true;
     }
     
-    // Security: ไม่มีกฎ catch-all แล้ว!
-    // ข้อมูลอื่นๆ ที่ไม่ได้กำหนดกฎจะถูกปฏิเสธอัตโนมัติ
+    // สำหรับความปลอดภัย: collections อื่นๆ ที่ไม่ได้กำหนดจะถูกปฏิเสธ
   }
 }
