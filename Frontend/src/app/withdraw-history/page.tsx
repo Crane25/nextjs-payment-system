@@ -11,7 +11,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useUserProfile } from '../../contexts/UserContext';
 import { usePermission } from '../../hooks/usePermission';
 import { useMultiTeam } from '../../hooks/useMultiTeam';
-import { collection, getDocs, onSnapshot, query, orderBy, limit, startAfter } from 'firebase/firestore';
+import { collection, getDocs, onSnapshot, query, orderBy, limit, startAfter, where } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { getWithdrawStatistics, isAggregationSupported } from '../../utils/aggregation';
 import toast from 'react-hot-toast';
@@ -74,8 +74,85 @@ export default function WithdrawHistory() {
 
   // Refs and cache
   const isLoadingRef = useRef(false);
-  const paginationCache = useRef<Map<number, WithdrawRecord[]>>(new Map());
-  const cursorCache = useRef<Map<number, any>>(new Map());
+  const paginationCache = useRef<Map<string, WithdrawRecord[]>>(new Map());
+  const cursorCache = useRef<Map<string, any>>(new Map());
+  const teamsCache = useRef<Map<string, any>>(new Map());
+  const usersCache = useRef<Map<string, any>>(new Map());
+  const lastCacheTime = useRef<Map<string, number>>(new Map());
+  const realTimeUnsubscribe = useRef<(() => void) | null>(null);
+  
+  // Cache configuration
+  const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+  const TEAMS_CACHE_TTL = 15 * 60 * 1000; // 15 minutes  
+  const USERS_CACHE_TTL = 15 * 60 * 1000; // 15 minutes
+
+  // Smart Caching System
+  const getCacheKey = useCallback((page: number, filters: any) => {
+    return `${page}-${JSON.stringify(filters)}`;
+  }, []);
+
+  const isCacheValid = useCallback((cacheKey: string, ttl: number = CACHE_TTL) => {
+    const lastTime = lastCacheTime.current.get(cacheKey);
+    return lastTime && (Date.now() - lastTime) < ttl;
+  }, [CACHE_TTL]);
+
+  const setCacheData = useCallback((cacheKey: string, data: any, cacheMap: Map<string, any>) => {
+    cacheMap.set(cacheKey, data);
+    lastCacheTime.current.set(cacheKey, Date.now());
+  }, []);
+
+  // Build server-side query with filters
+  const buildWithdrawQuery = useCallback((userTeamIds: string[], page: number) => {
+    const constraints: any[] = [];
+    
+    // Server-side filtering by team (most important filter)
+    if (selectedTeamFilter !== 'all') {
+      constraints.push(where('teamId', '==', selectedTeamFilter));
+    } else if (userTeamIds.length > 0) {
+      // Filter by user accessible teams (Firestore 'in' limit is 10)
+      constraints.push(where('teamId', 'in', userTeamIds.slice(0, 10)));
+    }
+
+    // Server-side filtering by status
+    if (filterStatus !== 'all') {
+      constraints.push(where('status', '==', filterStatus));
+    }
+
+    // Server-side filtering by date range (if period filter is set)
+    if (filterPeriod !== 'all' && filterPeriod !== 'custom') {
+      const now = new Date();
+      let filterDate = new Date();
+      
+      switch (filterPeriod) {
+        case 'today':
+          filterDate.setHours(0, 0, 0, 0);
+          break;
+        case 'week':
+          filterDate.setDate(now.getDate() - 7);
+          break;
+        case 'month':
+          filterDate.setDate(now.getDate() - 30);
+          break;
+      }
+      
+      constraints.push(where('timestamp', '>=', filterDate.toISOString()));
+    } else if (filterPeriod === 'custom' && (startDate || endDate)) {
+      if (startDate && endDate) {
+        constraints.push(where('timestamp', '>=', startDate));
+        constraints.push(where('timestamp', '<=', endDate));
+      } else if (startDate) {
+        constraints.push(where('timestamp', '>=', startDate));
+      } else if (endDate) {
+        constraints.push(where('timestamp', '<=', endDate));
+      }
+    }
+
+    // Add ordering and pagination
+    constraints.push(orderBy('timestamp', 'desc'));
+    constraints.push(limit(itemsPerPage * page));
+
+    return query(collection(db, 'withdrawHistory'), ...constraints);
+  }, [selectedTeamFilter, filterStatus, filterPeriod, startDate, endDate, itemsPerPage]);
 
   // Load statistics
   const loadWithdrawStatistics = useCallback(async (userTeamIds: string[]) => {
@@ -134,49 +211,94 @@ export default function WithdrawHistory() {
     }
   }, []);
 
-  // Data loading
+  // Data loading with Smart Caching and Server-side Filtering
   const loadWithdrawHistory = useCallback(async (forceRefresh = false, page = 1) => {
     if (!user || !userProfile || teamsLoading || isLoadingRef.current) {
       return;
     }
 
+    const userTeamIds = teams.map(team => team.id);
+    const filters = { 
+      selectedTeamFilter, 
+      filterStatus, 
+      filterPeriod, 
+      startDate, 
+      endDate,
+      userTeamIds: userTeamIds.join(',')
+    };
+    const cacheKey = getCacheKey(page, filters);
+
+    // Check cache first (unless force refresh)
+    if (!forceRefresh && isCacheValid(cacheKey)) {
+      const cachedData = paginationCache.current.get(cacheKey);
+      if (cachedData) {
+        setWithdrawHistory(cachedData);
+        setLoading(false);
+        return;
+      }
+    }
+
     try {
       isLoadingRef.current = true;
       setLoading(true);
-      if (forceRefresh) setRefreshing(true);
+      if (forceRefresh) {
+        setRefreshing(true);
+        // Clear all caches on force refresh
+        paginationCache.current.clear();
+        lastCacheTime.current.clear();
+      }
 
-      const userTeamIds = teams.map(team => team.id);
+      // Build optimized query with server-side filtering
+      const withdrawQuery = buildWithdrawQuery(userTeamIds, page);
+
+      // Check teams/users cache
+      const teamsNeedReload = !isCacheValid('teams', TEAMS_CACHE_TTL) || forceRefresh;
+      const usersNeedReload = !isCacheValid('users', USERS_CACHE_TTL) || forceRefresh;
+
+      const promises: Promise<any>[] = [getDocs(withdrawQuery)];
       
-      // Load withdraw records with proper data
-      const withdrawQuery = query(
-        collection(db, 'withdrawHistory'),
-        orderBy('timestamp', 'desc'),
-        limit(itemsPerPage * page) // Load more data for proper pagination
-      );
+      if (teamsNeedReload) {
+        promises.push(getDocs(collection(db, 'teams')));
+      }
+      
+      if (usersNeedReload) {
+        promises.push(getDocs(collection(db, 'users')));
+      }
 
-      const [withdrawSnapshot, teamsSnapshot, usersSnapshot] = await Promise.all([
-        getDocs(withdrawQuery),
-        getDocs(collection(db, 'teams')),
-        getDocs(collection(db, 'users'))
-      ]);
+      const results = await Promise.all(promises);
+      const withdrawSnapshot = results[0];
+      
+      // Handle teams data
+      let teamsMap = teamsCache.current;
+      if (teamsNeedReload && results[1]) {
+        teamsMap = new Map();
+        results[1].docs.forEach((doc: any) => {
+          teamsMap.set(doc.id, doc.data());
+        });
+        teamsCache.current = teamsMap;
+        setCacheData('teams', teamsMap, new Map());
+      }
 
-      // Create maps for team and user data
-      const teamsMap = new Map();
-      teamsSnapshot.docs.forEach(doc => {
-        teamsMap.set(doc.id, doc.data());
-      });
+      // Handle users data  
+      let usersMap = usersCache.current;
+      if (usersNeedReload) {
+        const userSnapshotIndex = teamsNeedReload ? 2 : 1;
+        if (results[userSnapshotIndex]) {
+          usersMap = new Map();
+          results[userSnapshotIndex].docs.forEach((doc: any) => {
+            const userData = doc.data();
+            usersMap.set(doc.id, userData);
+          });
+          usersCache.current = usersMap;
+          setCacheData('users', usersMap, new Map());
+        }
+      }
 
-      const usersMap = new Map();
-      usersSnapshot.docs.forEach(doc => {
-        const userData = doc.data();
-        usersMap.set(doc.id, userData);
-      });
-
-      // Process withdraw records with proper team and user mapping
-      const allRecords = withdrawSnapshot.docs.map(doc => {
+      // Process withdraw records with cached team and user mapping
+      const processedRecords = withdrawSnapshot.docs.map((doc: any) => {
         const data = doc.data();
         
-        // Get team name
+        // Get team name from cache
         let teamName = 'ไม่ระบุทีม';
         if (data.teamId && teamsMap.has(data.teamId)) {
           const teamData = teamsMap.get(data.teamId);
@@ -185,7 +307,7 @@ export default function WithdrawHistory() {
           teamName = `ทีม ${data.teamId.substring(0, 8)}`;
         }
 
-        // Get user information
+        // Get user information from cache
         let withdrawByEmail = '';
         let withdrawByUsername = '';
         if (data.withdrawByUid && usersMap.has(data.withdrawByUid)) {
@@ -203,14 +325,12 @@ export default function WithdrawHistory() {
         } as WithdrawRecord;
       });
 
-      // Filter records accessible to current user
-      const filteredRecords = allRecords.filter(record => 
-        record.teamId && userTeamIds.includes(record.teamId)
-      );
-
-      setWithdrawHistory(filteredRecords);
-      setTotalItems(filteredRecords.length);
-      setTotalPages(Math.ceil(filteredRecords.length / itemsPerPage));
+      // Cache the processed data
+      setCacheData(cacheKey, processedRecords, paginationCache.current);
+      
+      setWithdrawHistory(processedRecords);
+      setTotalItems(processedRecords.length);
+      setTotalPages(Math.ceil(processedRecords.length / itemsPerPage));
       setLastUpdated(new Date());
 
       // Load statistics on first page or refresh
@@ -226,11 +346,102 @@ export default function WithdrawHistory() {
       setRefreshing(false);
       isLoadingRef.current = false;
     }
-  }, [user, userProfile, teamsLoading, teams, itemsPerPage, loadWithdrawStatistics]);
+  }, [user, userProfile, teamsLoading, teams, itemsPerPage, selectedTeamFilter, filterStatus, filterPeriod, startDate, endDate, getCacheKey, isCacheValid, setCacheData, buildWithdrawQuery, loadWithdrawStatistics, TEAMS_CACHE_TTL, USERS_CACHE_TTL]);
 
-  // Helper functions
+  // Real-time Updates Setup
+  const setupRealTimeUpdates = useCallback(() => {
+    if (!user || !userProfile || teamsLoading) return;
+
+    // Clean up existing listener
+    if (realTimeUnsubscribe.current) {
+      realTimeUnsubscribe.current();
+    }
+
+    const userTeamIds = teams.map(team => team.id);
+    if (userTeamIds.length === 0) return;
+
+    // Listen only for new records (selective real-time)
+    const lastUpdateTime = lastUpdated.toISOString();
+    const realtimeQuery = query(
+      collection(db, 'withdrawHistory'),
+      where('timestamp', '>', lastUpdateTime),
+      where('teamId', 'in', userTeamIds.slice(0, 10)), // Firestore limit
+      orderBy('timestamp', 'desc'),
+      limit(5) // Only listen for few new records
+    );
+
+    realTimeUnsubscribe.current = onSnapshot(
+      realtimeQuery,
+      (snapshot) => {
+        setIsConnected(true);
+        
+        if (!snapshot.empty) {
+          const newRecords = snapshot.docs.map(doc => {
+            const data = doc.data();
+            
+            // Use cached team/user data for real-time updates
+            let teamName = 'ไม่ระบุทีม';
+            if (data.teamId && teamsCache.current.has(data.teamId)) {
+              const teamData = teamsCache.current.get(data.teamId);
+              teamName = teamData.name || `ทีม ${data.teamId.substring(0, 8)}`;
+            }
+
+            let withdrawByEmail = '';
+            let withdrawByUsername = '';
+            if (data.withdrawByUid && usersCache.current.has(data.withdrawByUid)) {
+              const userData = usersCache.current.get(data.withdrawByUid);
+              withdrawByEmail = userData.email || '';
+              withdrawByUsername = userData.username || userData.email?.split('@')[0] || '';
+            }
+            
+            return {
+              id: doc.id,
+              ...data,
+              teamName,
+              withdrawByEmail,
+              withdrawByUsername
+            } as WithdrawRecord;
+          });
+
+          // Add new records to the beginning of current data
+          setWithdrawHistory(prev => {
+            const existingIds = new Set(prev.map(r => r.id));
+            const uniqueNewRecords = newRecords.filter(r => !existingIds.has(r.id));
+            
+            if (uniqueNewRecords.length > 0) {
+              // Clear cache to force reload on next page change
+              paginationCache.current.clear();
+              lastCacheTime.current.clear();
+              
+              toast.success(
+                `มีรายการถอนเงินใหม่ ${uniqueNewRecords.length} รายการ`,
+                {
+                  duration: 4000,
+                  position: 'top-right',
+                }
+              );
+              
+              return [...uniqueNewRecords, ...prev];
+            }
+            
+            return prev;
+          });
+          
+          setLastUpdated(new Date());
+        }
+      },
+      (error) => {
+        console.error('Real-time listener error:', error);
+        setIsConnected(false);
+        toast.error('การเชื่อมต่อ Real-time ขัดข้อง');
+      }
+    );
+  }, [user, userProfile, teamsLoading, teams, lastUpdated]);
+
+  // Helper functions (now with client-side search only since server-side filtering handles the rest)
   const getFilteredHistory = () => {
     return withdrawHistory.filter(record => {
+      // Only apply search term filtering on client-side (for better UX)
       if (searchTerm) {
         const searchLower = searchTerm.toLowerCase();
         const matches = 
@@ -239,14 +450,6 @@ export default function WithdrawHistory() {
           record.note?.toLowerCase().includes(searchLower) ||
           record.teamName?.toLowerCase().includes(searchLower);
         if (!matches) return false;
-      }
-
-      if (filterStatus !== 'all' && record.status !== filterStatus) {
-        return false;
-      }
-
-      if (selectedTeamFilter !== 'all' && record.teamId !== selectedTeamFilter) {
-        return false;
       }
 
       return true;
@@ -296,6 +499,43 @@ export default function WithdrawHistory() {
       loadWithdrawHistory(true, 1);
     }
   }, [user?.uid, userProfile?.role, teamsLoading, loadWithdrawHistory]);
+
+  // Real-time updates effect
+  useEffect(() => {
+    if (user && userProfile && !teamsLoading && withdrawHistory.length > 0) {
+      // Set up real-time listener after initial data load
+      const timer = setTimeout(() => {
+        setupRealTimeUpdates();
+      }, 2000); // Wait 2 seconds after initial load
+
+      return () => {
+        clearTimeout(timer);
+        if (realTimeUnsubscribe.current) {
+          realTimeUnsubscribe.current();
+        }
+      };
+    }
+  }, [user, userProfile, teamsLoading, withdrawHistory.length, setupRealTimeUpdates]);
+
+  // Filter change effect - reload data when server-side filters change
+  useEffect(() => {
+    if (user && userProfile && !teamsLoading) {
+      // Clear cache and reload when filters change (except search term)
+      paginationCache.current.clear();
+      lastCacheTime.current.clear();
+      setCurrentPage(1);
+      loadWithdrawHistory(true, 1);
+    }
+  }, [selectedTeamFilter, filterStatus, filterPeriod, startDate, endDate, user, userProfile, teamsLoading, loadWithdrawHistory]);
+
+  // Cleanup effect
+  useEffect(() => {
+    return () => {
+      if (realTimeUnsubscribe.current) {
+        realTimeUnsubscribe.current();
+      }
+    };
+  }, []);
 
   // Permission check
   if (!canViewTopup()) {
