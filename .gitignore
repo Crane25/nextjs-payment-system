@@ -61,4 +61,8 @@ dist/
 
 # Temporary files
 *.tmp
-*.temp 
+*.temp
+
+# TypeScript generated files
+next-env.d.ts
+*.tsbuildinfo 
