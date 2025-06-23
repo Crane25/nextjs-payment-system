@@ -64,17 +64,14 @@ service cloud.firestore {
       // Admin อ่าน-เขียนได้ทุกทีม
       allow read, write: if isAdmin();
       
-      // Manager อ่านได้ทุกทีม แต่เขียนได้เฉพาะทีมตัวเอง
-      allow read: if isManagerOrAdmin();
-      allow write: if isManagerOrAdmin() && (
-        // สร้างทีมใหม่ได้
-        request.resource == null ||
-        // หรือเป็นสมาชิกของทีมนี้
-        isTeamMember(teamId)
-      );
+      // Manager อ่าน-เขียนได้ทั้งหมด (ยืดหยุ่นสำหรับการทำงาน)
+      allow read, write: if isManagerOrAdmin();
       
-      // User อ่านได้เฉพาะทีมที่เป็นสมาชิก
-      allow read: if isTeamMember(teamId);
+      // ทุกคนที่ล็อกอินแล้วอ่านได้ (สำหรับการทำงานของระบบ)
+      allow read: if isAuthenticated();
+      
+      // สร้างทีมใหม่ได้เมื่อล็อกอิน
+      allow create: if isAuthenticated();
     }
     
     // Team Members collection
@@ -82,19 +79,14 @@ service cloud.firestore {
       // Admin จัดการได้ทุกอย่าง
       allow read, write: if isAdmin();
       
-      // Manager อ่านได้ทั้งหมด แต่เขียนได้เฉพาะทีมตัวเอง
-      allow read: if isManagerOrAdmin();
-      allow write: if isManagerOrAdmin() && (
-        // ตรวจสอบว่าเป็นการจัดการสมาชิกในทีมตัวเอง
-        resource == null || // สร้างใหม่
-        isTeamMember(resource.data.teamId) // แก้ไขทีมตัวเอง
-      );
+      // Manager อ่าน-เขียนได้ทั้งหมด (ยืดหยุ่นสำหรับการทำงาน)
+      allow read, write: if isManagerOrAdmin();
       
-      // User อ่านได้เฉพาะข้อมูลตัวเอง
-      allow read: if isAuthenticated() && (
-        resource.data.userId == request.auth.uid ||
-        isTeamMember(resource.data.teamId)
-      );
+      // ทุกคนที่ล็อกอินแล้วอ่านได้ (สำหรับการทำงานของระบบ)
+      allow read: if isAuthenticated();
+      
+      // สร้างสมาชิกใหม่ได้เมื่อล็อกอิน
+      allow create: if isAuthenticated();
     }
     
     // Team-related collections อื่นๆ
@@ -138,23 +130,14 @@ service cloud.firestore {
       // Admin อ่าน-เขียนได้ทุกอย่าง
       allow read, write: if isAdmin();
       
-      // Manager อ่านได้ทั้งหมด สร้างได้
-      allow read, create: if isManagerOrAdmin();
+      // Manager อ่าน-เขียนได้ทั้งหมด
+      allow read, write: if isManagerOrAdmin();
       
-      // Manager แก้ไขได้เฉพาะของทีมตัวเอง
-      allow update, delete: if isManagerOrAdmin() && (
-        resource == null || 
-        isTeamMember(resource.data.teamId)
-      );
+      // ทุกคนที่ล็อกอินแล้วอ่าน-สร้างได้ (รองรับการทำงานของทีม)
+      allow read, create: if isAuthenticated();
       
-      // User อ่านได้เฉพาะของทีมตัวเอง
-      allow read: if isAuthenticated() && (
-        resource == null ||
-        isTeamMember(resource.data.teamId)
-      );
-      
-      // สร้างได้เมื่อล็อกอิน
-      allow create: if isAuthenticated();
+      // แก้ไข-ลบได้เฉพาะ Admin และ Manager
+      allow update, delete: if isManagerOrAdmin();
     }
     
     // Withdraw History
@@ -162,23 +145,14 @@ service cloud.firestore {
       // Admin อ่าน-เขียนได้ทุกอย่าง
       allow read, write: if isAdmin();
       
-      // Manager อ่านได้ทั้งหมด สร้างได้
-      allow read, create: if isManagerOrAdmin();
+      // Manager อ่าน-เขียนได้ทั้งหมด
+      allow read, write: if isManagerOrAdmin();
       
-      // Manager แก้ไขได้เฉพาะของทีมตัวเอง
-      allow update, delete: if isManagerOrAdmin() && (
-        resource == null || 
-        isTeamMember(resource.data.teamId)
-      );
+      // ทุกคนที่ล็อกอินแล้วอ่าน-สร้างได้ (รองรับการทำงานของทีม)
+      allow read, create: if isAuthenticated();
       
-      // User อ่านได้เฉพาะของทีมตัวเอง
-      allow read: if isAuthenticated() && (
-        resource == null ||
-        isTeamMember(resource.data.teamId)
-      );
-      
-      // สร้างได้เมื่อล็อกอิน
-      allow create: if isAuthenticated();
+      // แก้ไข-ลบได้เฉพาะ Admin และ Manager
+      allow update, delete: if isManagerOrAdmin();
     }
     
     // User history subcollections
