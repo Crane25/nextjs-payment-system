@@ -531,8 +531,15 @@ export default function TeamManagement() {
         ...(targetUserId && { userId: targetUserId })
       };
 
-      // เพิ่มสมาชิกเข้าทีม
-      const docRef = await addDoc(collection(db, 'teamMembers'), memberData);
+      // เพิ่มสมาชิกเข้าทีม (ขั้นตอนหลัก)
+      let docRef;
+      try {
+        docRef = await addDoc(collection(db, 'teamMembers'), memberData);
+      } catch (error) {
+        console.error('Failed to add team member:', error);
+        toast.error('ไม่สามารถเพิ่มสมาชิกได้ กรุณาลองใหม่');
+        return;
+      }
       
       // Clear cache และรีเฟรชข้อมูล
       delete teamDataCache[selectedTeamId];
@@ -543,13 +550,18 @@ export default function TeamManagement() {
       setTeamMembers(updatedMembers);
       
       // Load current data for updated members
-      await loadMembersWithCurrentData(updatedMembers);
+      try {
+        await loadMembersWithCurrentData(updatedMembers);
+      } catch (error) {
+        console.warn('Failed to load updated member data:', error);
+      }
       
-      // Log team member addition
+      // Log team member addition (ไม่ต้องรอผลลัพธ์)
       if (userProfile && selectedTeamId) {
         const selectedTeam = teams.find(t => t.id === selectedTeamId);
         if (selectedTeam) {
-          await logTeamMemberAdded(
+          // ทำแบบ fire-and-forget ไม่ block การทำงาน
+          logTeamMemberAdded(
             userProfile.uid,
             userProfile.email,
             userProfile.displayName,
@@ -557,39 +569,55 @@ export default function TeamManagement() {
             targetDisplayName,
             selectedTeam.name,
             memberRole
-          );
+          ).catch(error => {
+            console.warn('Failed to log team member addition:', error);
+          });
         }
       }
 
       // Refresh teams overview to update member count
       refreshTeams();
 
-      // อัพเดท users collection ถ้าเป็นผู้ใช้ที่มีในระบบ
+      // อัพเดท users collection ถ้าเป็นผู้ใช้ที่มีในระบบ (แบบ optional)
       if (targetUserId) {
-        await setDoc(doc(db, 'users', targetUserId), {
-          teamId: selectedTeamId,
-          lastLogin: new Date()
-        }, { merge: true });
-        
-        // ถ้าเป็นผู้ใช้ปัจจุบันที่ถูกเพิ่มเข้าทีม ให้ refresh profile
-        if (targetUserId === userProfile.uid) {
-          await refreshUserProfile();
+        try {
+          await setDoc(doc(db, 'users', targetUserId), {
+            teamId: selectedTeamId,
+            lastLogin: new Date()
+          }, { merge: true });
+          
+          // ถ้าเป็นผู้ใช้ปัจจุบันที่ถูกเพิ่มเข้าทีม ให้ refresh profile
+          if (targetUserId === userProfile.uid) {
+            try {
+              await refreshUserProfile();
+            } catch (error) {
+              console.warn('Failed to refresh user profile:', error);
+            }
+          }
+        } catch (error) {
+          console.warn('Failed to update user teamId:', error);
+          // ไม่ต้อง throw error เพราะไม่ critical
         }
       }
 
-      // อัพเดทจำนวนสมาชิกในทีม (ใช้ข้อมูลล่าสุดจาก Firestore)
-      const currentMembersQuery = query(
-        collection(db, 'teamMembers'),
-        where('teamId', '==', selectedTeamId),
-        where('status', '==', 'active')
-      );
-      const currentMembersSnapshot = await getDocs(currentMembersQuery);
-      const actualMemberCount = currentMembersSnapshot.docs.length;
-      
-      const teamRef = doc(db, 'teams', selectedTeamId);
-      await updateDoc(teamRef, {
-        memberCount: actualMemberCount
-      });
+      // อัพเดทจำนวนสมาชิกในทีม (แบบ optional)
+      try {
+        const currentMembersQuery = query(
+          collection(db, 'teamMembers'),
+          where('teamId', '==', selectedTeamId),
+          where('status', '==', 'active')
+        );
+        const currentMembersSnapshot = await getDocs(currentMembersQuery);
+        const actualMemberCount = currentMembersSnapshot.docs.length;
+        
+        const teamRef = doc(db, 'teams', selectedTeamId);
+        await updateDoc(teamRef, {
+          memberCount: actualMemberCount
+        });
+      } catch (error) {
+        console.warn('Failed to update team member count:', error);
+        // ไม่ต้อง throw error เพราะไม่ critical
+      }
       
       // Reset form
       setInviteEmail('');
