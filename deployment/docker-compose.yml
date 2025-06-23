@@ -1,5 +1,5 @@
 # ===================================
-# Docker Compose - Production with SSL
+# Docker Compose - Cloudflare SSL
 # Next.js Payment System v2.0
 # ===================================
 
@@ -12,7 +12,7 @@ services:
       context: ..
       dockerfile: deployment/Dockerfile
       target: runner
-    container_name: nextjs-app-prod
+    container_name: nextjs-app-cf
     restart: unless-stopped
     environment:
       - NODE_ENV=production
@@ -34,12 +34,13 @@ services:
       - NEXT_PUBLIC_APP_ENV=production
       - NEXT_PUBLIC_APP_VERSION=2.0.0
       - NEXT_PUBLIC_DOMAIN=scjsnext.com
-      # Security Configuration
+      # Security Configuration (Cloudflare handles HTTPS)
       - SECURITY_HEADERS_ENABLED=true
       - RATE_LIMIT_MAX_REQUESTS=100
       - RATE_LIMIT_WINDOW_MS=900000
-      - FORCE_HTTPS=true
+      - FORCE_HTTPS=false
       - SECURE_COOKIES=true
+      - CLOUDFLARE_SSL=true
       # Debug Configuration (Production)
       - NEXT_PUBLIC_DEBUG_ENABLED=false
       - NEXT_PUBLIC_LOG_LEVEL=error
@@ -48,10 +49,9 @@ services:
       - app-network
     volumes:
       - ../Frontend/.env.local:/app/.env.local:ro
-      - ../Frontend/.env.production:/app/.env.production:ro
       - app-logs:/app/logs
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -70,17 +70,16 @@ services:
       - SETGID
       - SETUID
 
-  # Nginx Reverse Proxy with SSL
+  # Nginx Reverse Proxy (Cloudflare SSL)
   nginx:
     image: nginx:alpine
-    container_name: nginx-proxy-ssl
+    container_name: nginx-proxy-cf
     restart: unless-stopped
     ports:
       - "80:80"
       - "443:443"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/ssl:/etc/nginx/ssl:ro
       - ./nginx/logs:/var/log/nginx
       - nginx-cache:/var/cache/nginx
     networks:
@@ -89,34 +88,12 @@ services:
       nextjs:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/health"]
       interval: 30s
       timeout: 10s
       retries: 3
     security_opt:
       - no-new-privileges:true
-
-  # Certbot for SSL Certificate Management
-  certbot:
-    image: certbot/certbot:latest
-    container_name: certbot-ssl
-    volumes:
-      - ./nginx/ssl:/etc/letsencrypt
-      - certbot-webroot:/var/www/certbot
-    command: certonly --webroot --webroot-path=/var/www/certbot --email rachaelagani63028@gmail.com --agree-tos --no-eff-email -d scjsnext.com -d www.scjsnext.com
-    depends_on:
-      - nginx
-
-  # Cron for SSL Renewal
-  certbot-renew:
-    image: certbot/certbot:latest
-    container_name: certbot-renewer
-    volumes:
-      - ./nginx/ssl:/etc/letsencrypt
-      - certbot-webroot:/var/www/certbot
-    command: renew --webroot --webroot-path=/var/www/certbot
-    profiles:
-      - renewal
 
 networks:
   app-network:
@@ -130,6 +107,3 @@ volumes:
   nginx-cache:
     driver: local
     name: nginx-cache
-  certbot-webroot:
-    driver: local
-    name: certbot-webroot

@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # ===================================
-# Cloudflare SSL Deployment Script
-# Next.js Payment System v2.0
+# Production Deployment Script
+# Next.js Payment System v2.0 with Cloudflare SSL
 # ===================================
 
 set -e
@@ -35,8 +35,8 @@ echo -e "${BLUE} Next.js Payment System v2.0${NC}"
 echo -e "${BLUE}========================================${NC}"
 
 # Check if we're in the right directory
-if [ ! -f "docker-compose-cloudflare.yml" ]; then
-    print_error "docker-compose-cloudflare.yml not found. Please run this script from the deployment directory."
+if [ ! -f "docker-compose.yml" ]; then
+    print_error "docker-compose.yml not found. Please run this script from the deployment directory."
     exit 1
 fi
 
@@ -111,7 +111,6 @@ fi
 # Stop existing containers
 print_status "Stopping existing containers..."
 docker-compose down --remove-orphans 2>/dev/null || true
-docker-compose -f docker-compose-no-ssl.yml down --remove-orphans 2>/dev/null || true
 
 # Clean up old images and containers
 print_status "Cleaning up old Docker resources..."
@@ -139,21 +138,21 @@ print_status "Validating configuration files..."
 
 # Test nginx configuration with a temporary container
 docker run --rm \
-  -v $(pwd)/nginx/nginx-cloudflare.conf:/etc/nginx/nginx.conf:ro \
+  -v $(pwd)/nginx/nginx.conf:/etc/nginx/nginx.conf:ro \
   nginx:alpine nginx -t || {
     print_error "Nginx configuration test failed"
     exit 1
 }
 
 # Validate Docker Compose configuration
-docker-compose -f docker-compose-cloudflare.yml config -q || {
+docker-compose config -q || {
     print_error "Docker Compose configuration is invalid"
     exit 1
 }
 
 # Build and start containers
 print_status "Building and starting containers with Cloudflare SSL..."
-docker-compose -f docker-compose-cloudflare.yml up -d --build --force-recreate
+docker-compose up -d --build --force-recreate
 
 # Wait for services to be ready
 print_status "Waiting for services to be ready..."
@@ -168,9 +167,9 @@ for i in $(seq 1 $HEALTH_CHECK_RETRIES); do
     print_status "Health check attempt $i/$HEALTH_CHECK_RETRIES..."
     
     # Check if containers are running
-    if ! docker-compose -f docker-compose-cloudflare.yml ps | grep -q "Up"; then
+    if ! docker-compose ps | grep -q "Up"; then
         print_warning "Some containers are not running"
-        docker-compose -f docker-compose-cloudflare.yml ps
+        docker-compose ps
     fi
     
     # Check Next.js health
@@ -198,7 +197,7 @@ for i in $(seq 1 $HEALTH_CHECK_RETRIES); do
     if [ $i -eq $HEALTH_CHECK_RETRIES ]; then
         print_error "Health checks failed after $HEALTH_CHECK_RETRIES attempts"
         print_status "Showing container logs for debugging..."
-        docker-compose -f docker-compose-cloudflare.yml logs --tail=50
+        docker-compose logs --tail=50
         exit 1
     fi
     
@@ -226,7 +225,7 @@ echo "   - http://$DOMAIN (Redirects to HTTPS via Cloudflare)"
 echo "   - http://167.172.65.185 (Direct server access)"
 echo ""
 echo -e "${GREEN}📊 Container Status:${NC}"
-docker-compose -f docker-compose-cloudflare.yml ps --format "table {{.Name}}\t{{.Status}}\t{{.Ports}}"
+docker-compose ps --format "table {{.Name}}\t{{.Status}}\t{{.Ports}}"
 echo ""
 echo -e "${GREEN}🔒 SSL Status:${NC}"
 echo "   - Cloudflare SSL: ✅ Enabled"
@@ -240,30 +239,30 @@ echo "   - Bot Protection: ✅ Available"
 echo "   - Real IP Detection: ✅ Configured"
 echo ""
 echo -e "${GREEN}📝 Useful Commands:${NC}"
-echo "   - View logs: docker-compose -f docker-compose-cloudflare.yml logs -f"
-echo "   - Restart app: docker-compose -f docker-compose-cloudflare.yml restart nextjs"
-echo "   - Stop all: docker-compose -f docker-compose-cloudflare.yml down"
-echo "   - Update app: git pull && docker-compose -f docker-compose-cloudflare.yml up -d --build"
+echo "   - View logs: docker-compose logs -f"
+echo "   - Restart app: docker-compose restart nextjs"
+echo "   - Stop all: docker-compose down"
+echo "   - Update app: git pull && docker-compose up -d --build"
 echo ""
 echo -e "${GREEN}🔍 Monitoring:${NC}"
-echo "   - Application logs: docker-compose -f docker-compose-cloudflare.yml logs nextjs"
-echo "   - Nginx logs: docker-compose -f docker-compose-cloudflare.yml logs nginx"
+echo "   - Application logs: docker-compose logs nextjs"
+echo "   - Nginx logs: docker-compose logs nginx"
 echo "   - Cloudflare Analytics: Check Cloudflare Dashboard"
 echo ""
 
 # Create deployment info file
-cat > deployment-info-cloudflare.txt << EOF
-Cloudflare Deployment Information
-================================
+cat > deployment-info.txt << EOF
+Production Deployment Information
+=================================
 Date: $(date)
 Domain: $DOMAIN
 SSL Provider: Cloudflare
 Local Server IP: 167.172.65.185
-Docker Compose: docker-compose-cloudflare.yml
-Nginx Config: nginx-cloudflare.conf
+Docker Compose: docker-compose.yml
+Nginx Config: nginx.conf
 
 Container Status:
-$(docker-compose -f docker-compose-cloudflare.yml ps)
+$(docker-compose ps)
 
 Health Check Results:
 - Next.js: $NEXTJS_HEALTHY
@@ -276,7 +275,7 @@ Cloudflare Features:
 - Security Headers: Configured
 EOF
 
-print_status "📄 Deployment info saved to: deployment-info-cloudflare.txt"
+print_status "📄 Deployment info saved to: deployment-info.txt"
 
 # Final instructions
 echo -e "${YELLOW}========================================${NC}"
