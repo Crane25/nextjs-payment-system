@@ -1,56 +1,69 @@
-# Use Node.js 18 Alpine as base image
-FROM node:18-alpine AS base
+# ===================================
+# Multi-stage Dockerfile for Next.js
+# Production-ready with security optimizations
+# ===================================
 
-# Install dependencies only when needed
-FROM base AS deps
-# Check https://github.com/nodejs/docker-node/tree/b4117f9333da4138b03a546ec926ef50a31506c3#nodealpine to understand why libc6-compat might be needed.
+# Stage 1: Dependencies
+FROM node:18-alpine AS deps
 RUN apk add --no-cache libc6-compat
 WORKDIR /app
 
-# Install dependencies based on the preferred package manager
-COPY Frontend/package.json Frontend/package-lock.json* ./
-RUN npm ci
+# Copy package files
+COPY Frontend/package*.json ./
+RUN npm ci --only=production --no-audit --no-fund
 
-# Rebuild the source code only when needed
-FROM base AS builder
+# Stage 2: Builder
+FROM node:18-alpine AS builder
 WORKDIR /app
-COPY --from=deps /app/node_modules ./node_modules
-COPY Frontend/ .
 
-# Build the application
-ENV NEXT_TELEMETRY_DISABLED 1
+# Copy dependencies
+COPY --from=deps /app/node_modules ./node_modules
+COPY Frontend/ ./
+
+# Build application
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 
-# Remove devDependencies after build
-RUN npm prune --production
-
-# Production image, copy all the files and run next
-FROM base AS runner
+# Stage 3: Runner (Production)
+FROM node:18-alpine AS runner
 WORKDIR /app
 
-ENV NODE_ENV production
-ENV NEXT_TELEMETRY_DISABLED 1
-
+# Create non-root user for security
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
 
+# Install security updates
+RUN apk update && apk upgrade && apk add --no-cache dumb-init
+
+# Copy built application
 COPY --from=builder /app/public ./public
-
-# Set the correct permission for prerender cache
-RUN mkdir .next
-RUN chown nextjs:nodejs .next
-
-# Automatically leverage output traces to reduce image size
-# https://nextjs.org/docs/advanced-features/output-file-tracing
+COPY --from=builder /app/package.json ./package.json
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
+# Create logs directory
+RUN mkdir -p /app/logs && chown nextjs:nodejs /app/logs
+
+# Environment variables
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV PORT=3000
+ENV HOSTNAME="0.0.0.0"
+
+# Security: Remove unnecessary packages and files
+RUN apk del --purge $(apk info --installed | grep -v '^musl\|^busybox\|^alpine-baselayout\|^alpine-keys\|^ca-certificates\|^libc6-compat\|^libssl\|^libcrypto\|^zlib\|^nodejs\|^dumb-init' | xargs)
+
+# Switch to non-root user
 USER nextjs
 
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD curl -f http://localhost:3000/api/health || exit 1
+
+# Expose port
 EXPOSE 3000
 
-ENV PORT 3000
-
-# server.js is created by next build from the standalone output
-# https://nextjs.org/docs/pages/api-reference/next-config-js/output
-CMD ["node", "server.js"] 
+# Start application with dumb-init for proper signal handling
+ENTRYPOINT ["dumb-init", "--"]
+CMD ["node", "server.js"]

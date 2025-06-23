@@ -1,15 +1,17 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // Output configuration for static hosting
+  // Output configuration for production
   output: 'standalone',
   
-  // Disable image optimization for static export (optional)
+  // Image optimization for production
   images: {
-    domains: ['localhost'],
-    unoptimized: true
+    domains: ['localhost', 'scjsnext.com', 'firebasestorage.googleapis.com'],
+    formats: ['image/webp', 'image/avif'],
+    minimumCacheTTL: 60 * 60 * 24 * 7, // 7 days
+    unoptimized: false
   },
   
-  // Security headers
+  // Production security headers
   async headers() {
     return [
       {
@@ -24,8 +26,24 @@ const nextConfig = {
             value: 'nosniff'
           },
           {
+            key: 'X-XSS-Protection',
+            value: '1; mode=block'
+          },
+          {
             key: 'Referrer-Policy',
-            value: 'origin-when-cross-origin'
+            value: 'strict-origin-when-cross-origin'
+          },
+          {
+            key: 'Permissions-Policy',
+            value: 'camera=(), microphone=(), geolocation=()'
+          },
+          {
+            key: 'Strict-Transport-Security',
+            value: 'max-age=31536000; includeSubDomains; preload'
+          },
+          {
+            key: 'Content-Security-Policy',
+            value: "default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline' https://www.gstatic.com https://www.googleapis.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https: blob:; connect-src 'self' https://api.github.com https://*.firebaseapp.com https://*.googleapis.com wss://*.firebaseio.com; frame-src 'none';"
           }
         ]
       }

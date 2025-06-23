@@ -1,287 +1,207 @@
-# 🚀 คู่มือติดตั้ง Next.js บน DigitalOcean Droplet
+# 🚀 Production Deployment Guide
+**Next.js Payment System v2.0 with SSL**
 
-คู่มือนี้จะช่วยคุณติดตั้งและ deploy Next.js application ไปยัง DigitalOcean Droplet พร้อม SSL certificate และ domain scjsnext.com
-
-## 📋 ข้อกำหนดเบื้องต้น
-
-- DigitalOcean Droplet (Ubuntu 20.04 LTS หรือสูงกว่า)
-- Domain name (scjsnext.com) ที่ชี้ไปยัง Droplet IP
-- Email address สำหรับ SSL certificate
-
-## 🛠️ ขั้นตอนการติดตั้ง
-
-### 1. เตรียม DigitalOcean Droplet
-
-1. สร้าง Droplet ใหม่บน DigitalOcean:
-   - **Image**: Ubuntu 20.04 LTS
-   - **Size**: Basic - 2GB RAM, 1 vCPU, 50GB SSD ($12/month)
-   - **Region**: เลือกที่ใกล้ผู้ใช้ที่สุด
-   - **Authentication**: SSH Key (แนะนำ) หรือ Password
-
-2. รอจน Droplet พร้อมใช้งานและจดบันทึก IP address
-
-### 2. ตั้งค่า DNS Records
-
-ไปยัง DNS provider ของคุณ (เช่น Cloudflare, Namecheap) และตั้งค่า:
-
-```
-Type    Name    Value               TTL
-A       @       YOUR_DROPLET_IP     300
-A       www     YOUR_DROPLET_IP     300
-```
-
-### 3. เชื่อมต่อกับ Droplet
+## 📋 Quick Start (One Command)
 
 ```bash
-ssh root@YOUR_DROPLET_IP
+# Download and run complete setup
+curl -fsSL https://raw.githubusercontent.com/yourusername/paymentnew/main/deployment/complete-setup.sh | sudo bash
 ```
 
-### 4. รัน Script ติดตั้งอัตโนมัติ
+## 🔧 Manual Setup
 
+### Step 1: Upload Files
 ```bash
-# สร้าง user ใหม่ (แนะนำ)
-adduser deploy
-usermod -aG sudo deploy
-su - deploy
-
-# Download และรัน installation script
-wget https://raw.githubusercontent.com/your-repo/paymentnew/main/deployment/install.sh
-chmod +x install.sh
-./install.sh
+# Upload project to server
+scp -r . root@your-server-ip:/var/www/scjsnext/
 ```
 
-### 5. Upload Project Files
-
-#### วิธีที่ 1: ใช้ Git (แนะนำ)
-
+### Step 2: Run Setup Scripts
 ```bash
-cd /var/www/scjsnext
-git clone https://github.com/your-username/paymentnew.git .
-```
-
-#### วิธีที่ 2: ใช้ SCP
-
-```bash
-# จากเครื่อง local
-scp -r paymentnew/ deploy@YOUR_DROPLET_IP:/var/www/scjsnext/
-```
-
-### 6. ตั้งค่า Environment Variables
-
-```bash
-cd /var/www/scjsnext/Frontend
-cp ../deployment/env.example .env.local
-
-# แก้ไขไฟล์ .env.local
-nano .env.local
-```
-
-**ใส่ค่าตัวแปรจาก Firebase และการตั้งค่าอื่นๆ:**
-
-```env
-NEXT_PUBLIC_FIREBASE_API_KEY=AIzaSyAvEe...
-NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=paymentnew-dae57.firebaseapp.com
-NEXT_PUBLIC_FIREBASE_PROJECT_ID=paymentnew-dae57
-NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=paymentnew-dae57.firebasestorage.app
-NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=1074850368558
-NEXT_PUBLIC_FIREBASE_APP_ID=1:1074850368558:web:...
-NODE_ENV=production
-```
-
-### 7. แก้ไข Docker Compose Configuration
-
-```bash
-cd /var/www/scjsnext/deployment
-nano docker-compose.yml
-```
-
-**แก้ไข email address ใน certbot service:**
-
-```yaml
-command: certonly --webroot -w /var/www/certbot --force-renewal --email YOUR_EMAIL@example.com -d scjsnext.com -d www.scjsnext.com --agree-tos
-```
-
-### 8. Deploy Application
-
-```bash
-cd /var/www/scjsnext/deployment
-chmod +x deploy.sh
-./deploy.sh
-```
-
-## 🔐 การตั้งค่า SSL Certificate
-
-Script จะทำการติดตั้ง SSL certificate อัตโนมัติโดยใช้ Let's Encrypt
-
-### ตรวจสอบ SSL Certificate
-
-```bash
-# ตรวจสอบสถานะ certificate
-docker-compose exec certbot certbot certificates
-
-# ทดสอบการต่ออายุ
-docker-compose run --rm certbot renew --dry-run
-```
-
-## 📊 การตรวจสอบและจัดการ
-
-### ตรวจสอบสถานะ Services
-
-```bash
+ssh root@your-server-ip
 cd /var/www/scjsnext/deployment
 
-# ดู container ที่กำลังทำงาน
-docker-compose ps
+# Make scripts executable
+chmod +x *.sh
 
-# ดู logs
+# Complete setup (all-in-one)
+./complete-setup.sh
+
+# OR run step by step:
+./install-dependencies.sh
+./setup-ssl.sh
+./deploy-production.sh
+```
+
+## 🌐 URLs
+- **Production:** https://scjsnext.com
+- **Alternative:** https://www.scjsnext.com
+- **Health Check:** https://scjsnext.com/nginx-health
+
+## 🛠️ Management Commands
+
+### Application Management
+```bash
+# View logs
 docker-compose logs -f
 
-# ดู logs ของ service เฉพาะ
-docker-compose logs nginx
-docker-compose logs nextjs
-```
-
-### คำสั่งที่มีประโยชน์
-
-```bash
-# Restart services
-docker-compose restart
-
-# Stop services
-docker-compose down
+# Restart application
+docker-compose restart nextjs
 
 # Update application
-git pull origin main
-docker-compose up -d --build
+./update-application.sh
 
-# View system resources
-htop
-df -h
-free -h
+# Stop all services
+docker-compose down
 ```
 
-## 🔄 การอัปเดต Application
-
+### SSL Management
 ```bash
-cd /var/www/scjsnext
+# Renew SSL certificate
+./renew-ssl.sh
 
-# Pull latest changes
-git pull origin main
-
-# Rebuild and restart
-cd deployment
-docker-compose up -d --build
+# Test SSL configuration
+./test-ssl.sh
 ```
 
-## 🚨 การแก้ไขปัญหา
-
-### ตรวจสอบ Logs
-
+### System Management
 ```bash
-# Application logs
+# System status
+./monitor-system.sh
+
+# Check all services
+./check-services.sh
+
+# Create backup
+./backup-system.sh
+```
+
+## 📊 Monitoring
+
+### Logs Location
+- **Application:** `docker-compose logs nextjs`
+- **Nginx:** `docker-compose logs nginx`
+- **System:** `/var/log/`
+
+### Health Checks
+- **Application:** https://scjsnext.com/api/health
+- **Nginx:** https://scjsnext.com/nginx-health
+- **SSL Grade:** [SSL Labs Test](https://www.ssllabs.com/ssltest/analyze.html?d=scjsnext.com)
+
+## 🔒 Security Features
+
+✅ **SSL/HTTPS Enforcement**
+- Let's Encrypt certificates
+- Auto-renewal configured
+- HSTS headers
+
+✅ **Firewall Configuration**
+- UFW firewall active
+- Only ports 22, 80, 443 open
+
+✅ **Intrusion Prevention**
+- Fail2ban configured
+- Rate limiting active
+
+✅ **Security Headers**
+- CSP (Content Security Policy)
+- XSS Protection
+- Frame Options
+- HSTS
+
+✅ **Container Security**
+- Non-root user
+- Read-only filesystem
+- Dropped capabilities
+
+## ⚙️ Configuration Files
+
+### Environment Variables
+- `Frontend/.env.local` - Application environment
+- `Frontend/.env.production` - Production overrides
+
+### Docker Configuration
+- `docker-compose.yml` - Production with SSL
+- `Dockerfile` - Multi-stage production build
+
+### Nginx Configuration
+- `nginx/nginx.conf` - SSL-enabled reverse proxy
+
+## 🔄 Automated Tasks
+
+| Task | Schedule | Description |
+|------|----------|-------------|
+| SSL Renewal | Daily 2 AM | Renew SSL certificates |
+| System Monitor | Every 6 hours | Check system status |
+| Backup | Weekly Sunday 3 AM | Full system backup |
+| Docker Cleanup | Weekly Saturday 4 AM | Clean unused resources |
+
+## 🆘 Troubleshooting
+
+### SSL Issues
+```bash
+# Check certificate
+openssl x509 -in nginx/ssl/live/scjsnext.com/fullchain.pem -text -noout
+
+# Renew certificate
+./renew-ssl.sh
+
+# Check Nginx config
+docker-compose exec nginx nginx -t
+```
+
+### Application Issues
+```bash
+# Check container status
+docker-compose ps
+
+# View application logs
 docker-compose logs nextjs
 
-# Nginx logs
-docker-compose logs nginx
-
-# System logs
-journalctl -u docker
+# Restart application
+docker-compose restart nextjs
 ```
 
-### ปัญหาที่พบบ่อย
-
-1. **Domain ไม่สามารถเข้าถึงได้**
-   - ตรวจสอบ DNS records
-   - ตรวจสอบ firewall: `sudo ufw status`
-
-2. **SSL Certificate Error**
-   - ตรวจสอบว่า domain ชี้มาที่ server ถูกต้อง
-   - รัน: `docker-compose logs certbot`
-
-3. **Application ไม่ทำงาน**
-   - ตรวจสอบ .env.local file
-   - ตรวจสอบ Docker images: `docker images`
-
-### การสำรองข้อมูล
-
+### Performance Issues
 ```bash
-# สำรอง SSL certificates
-sudo tar -czf ssl-backup.tar.gz /var/www/scjsnext/deployment/certbot/
-
-# สำรอง application data
-sudo tar -czf app-backup.tar.gz /var/www/scjsnext/
-```
-
-## 🎯 การปรับแต่งประสิทธิภาพ
-
-### ติดตั้ง Monitoring
-
-```bash
-# Install htop for system monitoring
-sudo apt install htop
-
-# Install Docker stats
-docker stats
-```
-
-### ตั้งค่า Log Rotation
-
-```bash
-# สร้างไฟล์ logrotate
-sudo nano /etc/logrotate.d/nginx-docker
-
-# เพิ่มเนื้อหา:
-/var/www/scjsnext/deployment/nginx/logs/*.log {
-    daily
-    rotate 30
-    compress
-    delaycompress
-    missingok
-    create 0644 root root
-    postrotate
-        docker-compose -f /var/www/scjsnext/deployment/docker-compose.yml exec nginx nginx -s reload
-    endscript
-}
-```
-
-## 📱 การติดตาม
-
-### Health Check URL
-
-- **Application**: https://scjsnext.com/api/health
-- **SSL Check**: https://www.ssllabs.com/ssltest/
-
-### Performance Monitoring
-
-```bash
-# ตรวจสอบ CPU และ Memory
+# Check system resources
 htop
 
-# ตรวจสอบ Disk Usage
+# Check disk space
 df -h
 
-# ตรวจสอบ Network
-iftop
+# Clean Docker
+docker system prune -f
 ```
 
-## 🆘 การติดต่อและสนับสนุน
+## 📈 Performance Optimizations
 
-หากพบปัญหาในการติดตั้ง:
+✅ **Nginx Optimizations**
+- Gzip compression
+- Static file caching
+- HTTP/2 enabled
+- Keep-alive connections
 
-1. ตรวจสอบ logs ด้วยคำสั่งที่ระบุไว้
-2. ตรวจสอบ DNS และ SSL configuration
-3. ตรวจสอบ firewall settings
-4. ตรวจสอบ Docker services status
+✅ **Application Optimizations**
+- Multi-stage Docker build
+- Production-optimized Next.js
+- Image optimization
+- Bundle optimization
+
+✅ **Security Optimizations**
+- Rate limiting
+- Connection limiting
+- Security headers
+- Input validation
+
+## 📞 Support
+
+For issues and support:
+1. Check logs: `docker-compose logs -f`
+2. Run diagnostics: `./check-services.sh`
+3. Review documentation above
+4. Contact system administrator
 
 ---
 
-## 📝 บันทึกสำคัญ
-
-- ✅ Backup ข้อมูลสำคัญก่อนทำการอัปเดต
-- ✅ ตรวจสอบ SSL certificate จะหมดอายุใน 90 วัน
-- ✅ Monitor system resources เป็นประจำ
-- ✅ เก็บ logs สำหรับการแก้ไขปัญหา
-
-**🎉 ยินดีด้วย! คุณติดตั้ง Next.js application บน DigitalOcean เรียบร้อยแล้ว**
-
-เข้าชมเว็บไซต์ได้ที่: https://scjsnext.com 
+**🎉 Your Next.js Payment System is production-ready with enterprise-grade security and performance!**
