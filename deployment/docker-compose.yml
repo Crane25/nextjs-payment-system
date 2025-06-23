@@ -3,8 +3,6 @@
 # Next.js Payment System v2.0
 # ===================================
 
-version: '3.8'
-
 services:
   # Next.js Application
   nextjs:
@@ -77,7 +75,6 @@ services:
     restart: unless-stopped
     ports:
       - "80:80"
-      - "443:443"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/logs:/var/log/nginx
