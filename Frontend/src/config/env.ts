@@ -27,15 +27,36 @@ export const config = {
     rateLimitMaxRequests: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '100'),
     rateLimitWindowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '900000'),
     
-    // Session security - Always use secure values
-    sessionSecret: process.env.SESSION_SECRET || '4a8f2e9c1b7d6e3f5a8b2c9d1e4f7a0b3c6d9e2f5a8b1c4d7e0f3a6b9c2e5f8a1b4d7e0f3a6b',
-    csrfSecret: process.env.CSRF_SECRET || '9d2e5f8a1b4d7e0f3a6b9c2e5f8a1b4d7e0f3a6b9c2e5f8a1b4d7e0f3a6b9c2e5f8a1b4d7e0f',
+    // Session security - REQUIRED environment variables
+    sessionSecret: process.env.SESSION_SECRET || (() => {
+      if (process.env.NODE_ENV === 'production') {
+        throw new Error('SESSION_SECRET environment variable is required in production');
+      }
+      return 'development-session-secret-' + Math.random().toString(36).substring(2, 15);
+    })(),
+    csrfSecret: process.env.CSRF_SECRET || (() => {
+      if (process.env.NODE_ENV === 'production') {
+        throw new Error('CSRF_SECRET environment variable is required in production');
+      }
+      return 'development-csrf-secret-' + Math.random().toString(36).substring(2, 15);
+    })(),
     sessionTimeout: parseInt(process.env.SESSION_TIMEOUT_MS || '3600000'),
     
     // Security headers
     securityHeadersEnabled: process.env.SECURITY_HEADERS_ENABLED !== 'false',
     strictTransportSecurity: process.env.HSTS_ENABLED !== 'false',
     contentSecurityPolicy: process.env.CSP_ENABLED !== 'false',
+    
+    // HTTPS enforcement
+    forceHttps: process.env.FORCE_HTTPS !== 'false' && process.env.NODE_ENV === 'production',
+    httpsPort: parseInt(process.env.HTTPS_PORT || '443'),
+    httpRedirectPort: parseInt(process.env.HTTP_REDIRECT_PORT || '80'),
+    
+    // Secure cookies
+    secureCookies: process.env.SECURE_COOKIES !== 'false' && process.env.NODE_ENV === 'production',
+    cookieSameSite: process.env.COOKIE_SAME_SITE || 'strict',
+    cookieHttpOnly: process.env.COOKIE_HTTP_ONLY !== 'false',
+    cookieSecure: process.env.COOKIE_SECURE !== 'false' && process.env.NODE_ENV === 'production',
     
     // CSP Configuration
     cspReportUri: process.env.CSP_REPORT_URI || '/api/security/report',
@@ -102,10 +123,20 @@ export const config = {
     enableGeoBlocking: process.env.ENABLE_GEO_BLOCKING === 'true',
     allowedCountries: process.env.ALLOWED_COUNTRIES?.split(',') || [],
     
-    // Data protection - Always use secure values
+    // Data protection - REQUIRED environment variables
     encryptionEnabled: process.env.ENCRYPTION_ENABLED !== 'false',
-    encryptionKey: process.env.ENCRYPTION_KEY || '06b259db817f41fbb73ac82a252a3b30',
-    hashSalt: process.env.HASH_SALT || 'dae13683bf304cfb90c3c97b649131aa',
+    encryptionKey: process.env.ENCRYPTION_KEY || (() => {
+      if (process.env.NODE_ENV === 'production') {
+        throw new Error('ENCRYPTION_KEY environment variable is required in production');
+      }
+      return 'development-encryption-key-' + Math.random().toString(36).substring(2, 15);
+    })(),
+    hashSalt: process.env.HASH_SALT || (() => {
+      if (process.env.NODE_ENV === 'production') {
+        throw new Error('HASH_SALT environment variable is required in production');
+      }
+      return 'development-hash-salt-' + Math.random().toString(36).substring(2, 15);
+    })(),
     
     // Database security
     dbConnectionTimeout: parseInt(process.env.DB_CONNECTION_TIMEOUT || '30000'),

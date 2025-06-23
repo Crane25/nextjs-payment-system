@@ -1,5 +1,15 @@
 import { config } from '../config/env';
 
+// HTTPS Redirect Middleware
+export function createHttpsRedirect() {
+  return (req: any, res: any, next: any) => {
+    if (config.security.forceHttps && req.header('x-forwarded-proto') !== 'https') {
+      return res.redirect(`https://${req.header('host')}${req.url}`);
+    }
+    next();
+  };
+}
+
 // Security headers utility functions
 export interface SecurityHeadersConfig {
   csp?: {
