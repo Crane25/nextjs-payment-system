@@ -1,287 +1,384 @@
-# 🚀 Production Deployment Guide
-**Next.js Payment System v2.0 with Cloudflare SSL**
+# 🚀 Next.js Payment System v2.0 - Production Deployment
 
-## ⚡ Quick Start (ใช้งานได้ทันที)
+## ภาพรวม
 
-```bash
-# บน server ที่ได้รับการเตรียมไว้แล้ว
-cd /var/www/scjsnext
-git pull origin main
-cd deployment
-./deploy.sh
+ระบบ Payment Next.js v2.0 พร้อมการใช้งานผ่าน Cloudflare SSL, Docker containerization และการปรับแต่งเพื่อประสิทธิภาพสูงสุด
+
+## 🏗️ สถาปัตยกรรมระบบ
+
+```
+┌─────────────┐    ┌──────────────┐    ┌─────────────┐    ┌──────────────┐
+│  Cloudflare │────│     Nginx    │────│   Next.js   │────│   Firebase   │
+│   SSL/CDN   │    │ Reverse Proxy│    │ Application │    │   Backend    │
+└─────────────┘    └──────────────┘    └─────────────┘    └──────────────┘
+      │                     │                   │                   │
+   ✅ HTTPS              ✅ Rate Limit      ✅ Production      ✅ Auth & DB
+   ✅ DDoS Protection    ✅ Compression     ✅ Optimized       ✅ Real-time
+   ✅ Global CDN         ✅ Load Balance    ✅ Secure          ✅ Scalable
 ```
 
-## 🔧 การติดตั้งครั้งแรก
+## 📋 ข้อกำหนดเบื้องต้น
 
-### ขั้นตอนที่ 1: เตรียม Server
+### เซิร์ฟเวอร์
+- **OS**: Ubuntu 20.04+ / Debian 11+
+- **RAM**: 2GB+ (แนะนำ 4GB)
+- **Storage**: 20GB+ SSD
+- **CPU**: 2 cores+
+- **Network**: Static IP address
+
+### ซอฟต์แวร์
+- Docker Engine 20.10+
+- Docker Compose v2.0+
+- Git
+- Nginx (จะติดตั้งใน container)
+
+### โดเมนและ DNS
+- โดเมนที่ลงทะเบียนแล้ว
+- Cloudflare account (Free plan เพียงพอ)
+- DNS records ที่ตั้งค่าแล้ว
+
+## 🛠️ การติดตั้ง
+
+### 1. เตรียมเซิร์ฟเวอร์
 
 ```bash
-# SSH เข้า server
-ssh root@167.172.65.185
-
 # อัพเดทระบบ
-apt update && apt upgrade -y
+sudo apt update && sudo apt upgrade -y
 
 # ติดตั้ง Docker
 curl -fsSL https://get.docker.com -o get-docker.sh
-sh get-docker.sh
+sudo sh get-docker.sh
+sudo usermod -aG docker $USER
 
-# ติดตั้ง Docker Compose
-curl -L "https://github.com/docker/compose/releases/download/v2.24.0/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-chmod +x /usr/local/bin/docker-compose
+# ติดตั้ง Git และเครื่องมือเสริม
+sudo apt install -y git curl wget dos2unix
 
-# ติดตั้ง Git
-apt install -y git
-
-# ตั้งค่า Firewall
-ufw allow ssh
-ufw allow 80/tcp
-ufw allow 443/tcp
-ufw --force enable
+# รีสตาร์ทเพื่อใช้งาน Docker
+sudo reboot
 ```
 
-### ขั้นตอนที่ 2: Clone โปรเจ็ค
+### 2. ตั้งค่า Cloudflare
 
-```bash
-# สร้างโฟลเดอร์
-mkdir -p /var/www
-
-# Clone โปรเจ็ค
-cd /var/www
-git clone https://github.com/Crane25/nextjs-payment-system.git scjsnext
-cd scjsnext
-```
-
-### ขั้นตอนที่ 3: ตั้งค่า Cloudflare
-
-**⚠️ สำคัญ: ต้องตั้งค่า Cloudflare ก่อน deploy**
-
-1. **DNS Settings ใน Cloudflare Dashboard:**
+#### DNS Settings
+1. เข้า Cloudflare Dashboard
+2. เลือกโดเมนของคุณ
+3. ไป DNS → Records
+4. เพิ่ม A records:
    ```
    Type: A
-   Name: scjsnext.com
+   Name: @
    Content: 167.172.65.185
-   Proxy status: ☁️ Proxied (สีส้ม)
+   Proxy: ☁️ Proxied
    
    Type: A  
    Name: www
    Content: 167.172.65.185
-   Proxy status: ☁️ Proxied (สีส้ม)
+   Proxy: ☁️ Proxied
    ```
 
-2. **SSL/TLS Settings ใน Cloudflare:**
-   ```
-   SSL/TLS > Overview > Encryption mode: Full
-   SSL/TLS > Edge Certificates > Always Use HTTPS: ON
-   SSL/TLS > Edge Certificates > HTTP Strict Transport Security: Enable
-   ```
+#### SSL/TLS Settings
+1. ไป SSL/TLS → Overview
+2. ตั้งค่า SSL/TLS encryption mode: **Full**
+3. ไป SSL/TLS → Edge Certificates
+4. เปิด **Always Use HTTPS**: ON
+5. เปิด **HTTP Strict Transport Security (HSTS)**: ON
 
-3. **Security Settings (แนะนำ):**
-   ```
-   Security > Settings > Security Level: Medium
-   Security > Settings > Bot Fight Mode: ON
-   ```
+#### Security Settings (แนะนำ)
+1. ไป Security → Settings
+2. ตั้งค่า Security Level: **Medium** หรือ **High**
+3. เปิด **Bot Fight Mode**: ON
+4. ไป Security → WAF
+5. สร้าง Custom Rules ตามความต้องการ
 
-### ขั้นตอนที่ 4: Deploy
+### 3. Clone และตั้งค่า Project
 
 ```bash
-# ไปที่โฟลเดอร์ deployment
-cd deployment
+# Clone repository
+cd /var/www
+sudo git clone https://github.com/Crane25/nextjs-payment-system.git scjsnext
+sudo chown -R $USER:$USER scjsnext
+cd scjsnext
 
-# รัน deployment script
+# สร้าง production environment file
+cp Frontend/.env.example Frontend/.env.local
+nano Frontend/.env.local  # แก้ไขค่าตามต้องการ
+```
+
+### 4. รัน Deployment Script
+
+```bash
+cd deployment
 chmod +x deploy.sh
 ./deploy.sh
 ```
 
-## 🌐 URL หลังจาก Deploy สำเร็จ
+Script จะทำการ:
+- ✅ ตรวจสอบการตั้งค่า Cloudflare
+- ✅ สร้าง `.env.local` หากไม่มี
+- ✅ ตรวจสอบ Docker configuration
+- ✅ Build และ start containers
+- ✅ ทดสอบ health checks
+- ✅ แสดงสรุปการติดตั้ง
 
-- **Primary:** https://scjsnext.com
-- **WWW:** https://www.scjsnext.com  
-- **Health Check:** https://scjsnext.com/health
+## 🔧 การจัดการระบบ
 
-## 🛠️ คำสั่งจัดการระบบ
-
-### การจัดการ Application
+### คำสั่งพื้นฐาน
 
 ```bash
+cd /var/www/scjsnext/deployment
+
+# ดูสถานะ containers
+docker compose ps
+
 # ดู logs
-docker-compose logs -f
+docker compose logs -f
+docker compose logs nextjs  # เฉพาะ Next.js
+docker compose logs nginx   # เฉพาะ Nginx
 
-# ดู logs เฉพาะ Next.js
-docker-compose logs -f nextjs
+# รีสตาร์ท services
+docker compose restart
+docker compose restart nextjs  # เฉพาะ Next.js
+docker compose restart nginx   # เฉพาะ Nginx
 
-# ดู logs เฉพาะ Nginx
-docker-compose logs -f nginx
-
-# Restart application
-docker-compose restart nextjs
-
-# Restart ทั้งระบบ
-docker-compose restart
-
-# Stop ทั้งระบบ
-docker-compose down
-
-# อัพเดท application
+# อัพเดทระบบ
 git pull origin main
-docker-compose up -d --build
+docker compose up -d --build
+
+# หยุดระบบ
+docker compose down
+
+# หยุดและลบ volumes
+docker compose down -v
 ```
 
-### การตรวจสอบสถานะ
+### การ Monitor
 
 ```bash
-# ดูสถานะ containers
-docker-compose ps
+# ตรวจสอบ health
+curl https://scjsnext.com/health
+curl https://scjsnext.com/api/health
 
-# ดูการใช้ resources
+# ดู resource usage
 docker stats
 
-# ทดสอบเว็บไซต์
-curl -I https://scjsnext.com
-curl https://scjsnext.com/health
+# ตรวจสอบ disk space
+df -h
+docker system df
+
+# ดู network connections
+docker compose ps --format "table {{.Name}}\t{{.Ports}}\t{{.Status}}"
 ```
 
-## 🔍 Troubleshooting
+## 🚨 การแก้ไขปัญหา
 
-### ปัญหาที่พบบ่อย
+### ปัญหาทั่วไป
 
-#### 1. เว็บไซต์เข้าไม่ได้
+#### 1. Container ไม่สามารถ start ได้
 ```bash
-# ตรวจสอบ containers
-docker-compose ps
-
 # ตรวจสอบ logs
-docker-compose logs nginx
-docker-compose logs nextjs
+docker compose logs
 
-# ตรวจสอบ firewall
-ufw status
-```
+# ตรวจสอบ disk space
+df -h
 
-#### 2. SSL ไม่ทำงาน
-```bash
-# ตรวจสอบ Cloudflare settings
-# - DNS ต้องเป็น Proxied (☁️)
-# - SSL/TLS mode ต้องเป็น "Full"
-
-# ตรวจสอบ nginx config
-docker-compose exec nginx nginx -t
-```
-
-#### 3. 502 Bad Gateway
-```bash
-# ตรวจสอบ Next.js container
-docker-compose logs nextjs
-
-# Restart Next.js
-docker-compose restart nextjs
-```
-
-#### 4. Real IP ไม่ถูกต้อง
-```bash
-# ตรวจสอบ Cloudflare IP ranges ใน nginx.conf
-# หากมี IP ranges ใหม่ จาก Cloudflare อาจต้องอัพเดท
-```
-
-### การแก้ไขปัญหาทั่วไป
-
-```bash
-# รีสตาร์ททั้งระบบ
-docker-compose down
-docker-compose up -d
-
-# ล้าง Docker cache
+# ลบ containers เก่า
+docker compose down -v
 docker system prune -f
-
-# อัพเดทและ rebuild
-git pull origin main
-docker-compose up -d --build --force-recreate
+docker compose up -d --build
 ```
 
-## 📊 การ Monitor และ Logging
+#### 2. เว็บไซต์เข้าไม่ได้
+```bash
+# ตรวจสอบ nginx config
+docker compose exec nginx nginx -t
+
+# ตรวจสอบ Cloudflare DNS
+dig scjsnext.com
+nslookup scjsnext.com
+
+# ทดสอบการเชื่อมต่อ
+curl -I http://localhost
+curl -I https://scjsnext.com
+```
+
+#### 3. 503 Service Unavailable
+```bash
+# ตรวจสอบ Next.js health
+docker compose logs nextjs --tail=50
+curl http://localhost:3000/api/health
+
+# รีสตาร์ท Next.js
+docker compose restart nextjs
+
+# ตรวจสอบ rate limiting
+docker compose logs nginx | grep limit_req
+```
+
+#### 4. SSL Certificate ไม่ทำงาน
+```bash
+# ตรวจสอบ Cloudflare SSL mode
+# ต้องเป็น "Full" ไม่ใช่ "Full (strict)"
+
+# ตรวจสอบ DNS propagation
+dig +trace scjsnext.com
+
+# Clear Cloudflare cache
+# ไป Cloudflare Dashboard → Caching → Purge Everything
+```
 
 ### Log Files
+
 ```bash
 # Application logs
-docker-compose logs nextjs
+docker compose logs nextjs > app.log
 
-# Web server logs  
-docker-compose logs nginx
+# Nginx access logs
+docker compose exec nginx cat /var/log/nginx/access.log
+
+# Nginx error logs  
+docker compose exec nginx cat /var/log/nginx/error.log
 
 # System logs
-journalctl -f
+journalctl -u docker -f
 ```
 
-### Performance Monitoring
+## 🔒 Security Best Practices
+
+### การตั้งค่าความปลอดภัย
+
+1. **Firewall Configuration**
+   ```bash
+   sudo ufw enable
+   sudo ufw allow 22    # SSH
+   sudo ufw allow 80    # HTTP
+   sudo ufw allow 443   # HTTPS
+   ```
+
+2. **Regular Updates**
+   ```bash
+   # อัพเดท OS
+   sudo apt update && sudo apt upgrade -y
+   
+   # อัพเดท Docker images
+   docker compose pull
+   docker compose up -d
+   ```
+
+3. **Backup Strategy**
+   ```bash
+   # Backup configurations
+   tar -czf backup-$(date +%Y%m%d).tar.gz \
+     Frontend/.env.local \
+     deployment/
+   
+   # Backup volumes
+   docker run --rm \
+     -v app-logs:/data \
+     -v $(pwd):/backup \
+     alpine tar czf /backup/app-logs-$(date +%Y%m%d).tar.gz /data
+   ```
+
+### Rate Limiting Configuration
+
+ระบบมี rate limiting หลายระดับ:
+
+- **Static files**: 100 req/s (burst: 500)
+- **API endpoints**: 20 req/s (burst: 100)  
+- **General requests**: 10 req/s (burst: 50)
+- **Login attempts**: 5 req/minute (burst: 10)
+
+## 📊 Performance Monitoring
+
+### Metrics ที่ควร Monitor
+
+1. **Response Times**
+   ```bash
+   curl -w "@curl-format.txt" -o /dev/null -s https://scjsnext.com
+   ```
+
+2. **Container Resources**
+   ```bash
+   docker stats --no-stream
+   ```
+
+3. **Nginx Metrics**
+   ```bash
+   # Request rate
+   docker compose exec nginx grep -c "$(date '+%d/%b/%Y')" /var/log/nginx/access.log
+   
+   # Error rate
+   docker compose exec nginx grep -c "$(date '+%d/%b/%Y')" /var/log/nginx/error.log
+   ```
+
+### Performance Optimizations
+
+ระบบได้รับการปรับแต่ง:
+
+- ✅ **Gzip Compression**: ลดขนาดไฟล์ 60-80%
+- ✅ **Static File Caching**: Cache 1 ปี
+- ✅ **Proxy Buffering**: เพิ่มประสิทธิภาพ I/O
+- ✅ **Keep-Alive Connections**: ลด latency
+- ✅ **Worker Optimization**: 4096 connections per worker
+
+## 📞 Support & Maintenance
+
+### การอัพเดทระบบ
+
 ```bash
-# ดูการใช้ CPU และ Memory
-docker stats
-
-# ดูขนาด logs
-du -sh /var/lib/docker/containers/*/logs/
-
-# ดู network traffic
-ss -tuln
-```
-
-## 🔄 การอัพเดท
-
-### อัพเดท Application
-```bash
+# อัพเดทจาก Git
 cd /var/www/scjsnext
 git pull origin main
+
+# Rebuild และ deploy
 cd deployment
-docker-compose up -d --build
+docker compose up -d --build
+
+# ตรวจสอบ health
+./deploy.sh
 ```
 
-### อัพเดท System
+### การสำรองข้อมูล
+
 ```bash
-# อัพเดท packages
-apt update && apt upgrade -y
+# สำรอง configuration
+mkdir -p backups/$(date +%Y%m%d)
+cp -r deployment/ backups/$(date +%Y%m%d)/
+cp Frontend/.env.local backups/$(date +%Y%m%d)/
 
-# อัพเดท Docker
-curl -fsSL https://get.docker.com -o get-docker.sh
-sh get-docker.sh
+# สำรอง Docker volumes
+docker run --rm \
+  -v app-logs:/source:ro \
+  -v $(pwd)/backups:/backup \
+  alpine tar czf /backup/volumes-$(date +%Y%m%d).tar.gz /source
 ```
 
-## 🛡️ Security Features
+## 🎯 Next Steps
 
-### ✅ Features ที่เปิดใช้งานแล้ว:
+หลังจากติดตั้งเสร็จ แนะนำให้:
 
-- **Cloudflare SSL:** HTTPS encryption และ auto-renewal
-- **Security Headers:** XSS Protection, Content Security Policy, HSTS
-- **Rate Limiting:** API และ login endpoint protection  
-- **Real IP Detection:** ดึง IP จริงจาก Cloudflare
-- **Firewall:** UFW กับพอร์ตที่จำเป็นเท่านั้น
-- **Container Security:** Non-root user, dropped capabilities
-- **DDoS Protection:** ผ่าน Cloudflare
+1. ✅ ทดสอบการทำงานของระบบทั้งหมด
+2. ✅ ตั้งค่า monitoring และ alerting
+3. ✅ สร้าง backup strategy
+4. ✅ ทบทวนการตั้งค่าความปลอดภัย
+5. ✅ เตรียม disaster recovery plan
 
-### 🔧 Cloudflare Features:
+## 📚 เอกสารเพิ่มเติม
 
-- **CDN:** Cache static files ทั่วโลก
-- **DDoS Protection:** อัตโนมัติ
-- **Bot Protection:** Bot Fight Mode
-- **Analytics:** Real-time traffic analytics
-- **WAF:** Web Application Firewall (ตั้งค่าเพิ่มได้)
-
-## 📋 Checklist หลัง Deploy
-
-- [ ] เว็บไซต์เข้าได้ผ่าน https://scjsnext.com
-- [ ] SSL certificate ทำงานปกติ (เห็นไอคอนกุญแจ)
-- [ ] Health check ตอบกลับ: https://scjsnext.com/health
-- [ ] ไม่มี console errors ใน browser
-- [ ] Cloudflare Analytics แสดงข้อมูล traffic
-- [ ] Rate limiting ทำงาน (ทดสอบด้วยการส่ง request หลายครั้ง)
-
-## 📞 Support
-
-หากมีปัญหา:
-
-1. **ตรวจสอบ logs:** `docker-compose logs -f`
-2. **ตรวจสอบสถานะ:** `docker-compose ps`
-3. **ทดสอบ connectivity:** `curl -I https://scjsnext.com`
-4. **ตรวจสอบ Cloudflare dashboard:** Analytics และ Security events
+- [Next.js Production Deployment](https://nextjs.org/docs/deployment)
+- [Docker Compose Production](https://docs.docker.com/compose/production/)
+- [Nginx Performance Tuning](https://nginx.org/en/docs/http/ngx_http_core_module.html)
+- [Cloudflare Security Settings](https://developers.cloudflare.com/security/)
 
 ---
 
-**🎉 ระบบ Next.js Payment System v2.0 พร้อมใช้งาน production พร้อม enterprise-grade security ผ่าน Cloudflare!**
+## 📧 ติดต่อ
+
+หากมีปัญหาหรือต้องการความช่วยเหลือ:
+
+- **GitHub Issues**: [nextjs-payment-system/issues](https://github.com/Crane25/nextjs-payment-system/issues)
+- **Documentation**: README.md in project root
+- **Server Health**: https://scjsnext.com/health
+
+---
+
+*Last updated: $(date '+%Y-%m-%d %H:%M:%S')*
