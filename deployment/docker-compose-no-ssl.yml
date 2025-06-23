@@ -1,0 +1,107 @@
+# ===================================
+# Docker Compose - No SSL (Quick Start)
+# Next.js Payment System v2.0
+# ===================================
+
+version: '3.8'
+
+services:
+  # Next.js Application
+  nextjs:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile
+      target: runner
+    container_name: nextjs-app
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - HOSTNAME=0.0.0.0
+      # Security Environment Variables
+      - SESSION_SECRET=4a8f2e9c1b7d6e3f5a8b2c9d1e4f7a0b3c6d9e2f5a8b1c4d7e0f3a6b9c2e5f8a1b4d7e0f3a6b
+      - CSRF_SECRET=9d2e5f8a1b4d7e0f3a6b9c2e5f8a1b4d7e0f3a6b9c2e5f8a1b4d7e0f3a6b9c2e5f8a1b4d7e0f
+      - ENCRYPTION_KEY=06b259db817f41fbb73ac82a252a3b30
+      - HASH_SALT=dae13683bf304cfb90c3c97b649131aa
+      # Firebase Configuration
+      - NEXT_PUBLIC_FIREBASE_API_KEY=AIzaSyAvEe6PF9mnwN8Vqf9wqWUkWA58coXKpiA
+      - NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=paymentnew-dae57.firebaseapp.com
+      - NEXT_PUBLIC_FIREBASE_PROJECT_ID=paymentnew-dae57
+      - NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=paymentnew-dae57.firebasestorage.app
+      - NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=1074850368558
+      - NEXT_PUBLIC_FIREBASE_APP_ID=1:1074850368558:web:f7c3c3f162dfc8af1fa3bf
+      # Application Configuration
+      - NEXT_PUBLIC_APP_ENV=production
+      - NEXT_PUBLIC_APP_VERSION=2.0.0
+      - NEXT_PUBLIC_DOMAIN=167.172.65.185
+      # Security Configuration (No HTTPS)
+      - SECURITY_HEADERS_ENABLED=true
+      - RATE_LIMIT_MAX_REQUESTS=100
+      - RATE_LIMIT_WINDOW_MS=900000
+      - FORCE_HTTPS=false
+      - SECURE_COOKIES=false
+      # Debug Configuration (Production)
+      - NEXT_PUBLIC_DEBUG_ENABLED=false
+      - NEXT_PUBLIC_LOG_LEVEL=error
+      - NEXT_PUBLIC_SHOW_ERROR_DETAILS=false
+    networks:
+      - app-network
+    volumes:
+      - ../Frontend/.env.local:/app/.env.local:ro
+      - app-logs:/app/logs
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    user: "1001:1001"
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /app/.next/cache
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+
+  # Nginx Reverse Proxy (No SSL)
+  nginx:
+    image: nginx:alpine
+    container_name: nginx-proxy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx-no-ssl.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/logs:/var/log/nginx
+      - nginx-cache:/var/cache/nginx
+    networks:
+      - app-network
+    depends_on:
+      nextjs:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    security_opt:
+      - no-new-privileges:true
+
+networks:
+  app-network:
+    driver: bridge
+    name: payment-network
+
+volumes:
+  app-logs:
+    driver: local
+    name: app-logs
+  nginx-cache:
+    driver: local
+    name: nginx-cache

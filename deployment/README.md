@@ -1,11 +1,27 @@
 # 🚀 Production Deployment Guide
-**Next.js Payment System v2.0 with SSL**
+**Next.js Payment System v2.0 - Multiple Deployment Options**
 
-## 📋 Quick Start (One Command)
+## 🎯 Quick Start (Choose Your Option)
 
+### Option 1: Super Quick (No SSL)
 ```bash
-# Download and run complete setup
-curl -fsSL https://raw.githubusercontent.com/yourusername/paymentnew/main/deployment/complete-setup.sh | sudo bash
+cd /var/www/scjsnext/deployment
+./quick-deploy.sh
+# Choose option 1
+```
+
+### Option 2: Cloudflare SSL (Recommended)
+```bash
+cd /var/www/scjsnext/deployment
+./quick-deploy.sh
+# Choose option 2
+```
+
+### Option 3: Let's Encrypt SSL
+```bash
+cd /var/www/scjsnext/deployment
+./quick-deploy.sh
+# Choose option 3
 ```
 
 ## 🔧 Manual Setup
@@ -33,23 +49,57 @@ chmod +x *.sh
 ./deploy-production.sh
 ```
 
-## 🌐 URLs
-- **Production:** https://scjsnext.com
-- **Alternative:** https://www.scjsnext.com
-- **Health Check:** https://scjsnext.com/nginx-health
+## 🌐 URLs (Depending on Deployment Option)
+
+### No SSL Deployment:
+- **HTTP:** http://167.172.65.185
+- **Health Check:** http://167.172.65.185/health
+
+### Cloudflare SSL Deployment:
+- **HTTPS:** https://scjsnext.com (Primary)
+- **HTTPS:** https://www.scjsnext.com (Alternative)
+- **Health Check:** https://scjsnext.com/health
+
+### Let's Encrypt SSL Deployment:
+- **HTTPS:** https://scjsnext.com (Primary)
+- **HTTPS:** https://www.scjsnext.com (Alternative)
+- **Health Check:** https://scjsnext.com/health
 
 ## 🛠️ Management Commands
 
 ### Application Management
+
+#### For No SSL Deployment:
+```bash
+# View logs
+docker-compose -f docker-compose-no-ssl.yml logs -f
+
+# Restart application
+docker-compose -f docker-compose-no-ssl.yml restart nextjs
+
+# Stop all services
+docker-compose -f docker-compose-no-ssl.yml down
+```
+
+#### For Cloudflare SSL Deployment:
+```bash
+# View logs
+docker-compose -f docker-compose-cloudflare.yml logs -f
+
+# Restart application
+docker-compose -f docker-compose-cloudflare.yml restart nextjs
+
+# Stop all services
+docker-compose -f docker-compose-cloudflare.yml down
+```
+
+#### For Let's Encrypt SSL Deployment:
 ```bash
 # View logs
 docker-compose logs -f
 
 # Restart application
 docker-compose restart nextjs
-
-# Update application
-./update-application.sh
 
 # Stop all services
 docker-compose down
