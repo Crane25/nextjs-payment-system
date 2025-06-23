@@ -1,6 +1,7 @@
 // Security utility functions
 import { SecurityMonitor, InputSanitizer } from './securityHeaders';
 import { config } from '../config/env';
+import { serverConfig } from '../config/env.server';
 
 /**
  * Sanitize user input to prevent XSS attacks
@@ -346,7 +347,7 @@ export function getSecurityAuditReport(): {
   }
   
   // Check for default secrets
-  if (config.security.sessionSecret.includes('default')) {
+      if (serverConfig.security.sessionSecret.includes('default')) {
     issues.push({
       severity: 'high',
       message: 'ใช้ Session Secret เริ่มต้น',

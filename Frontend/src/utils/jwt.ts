@@ -1,5 +1,6 @@
 // JWT utility functions for authentication
 import { config } from '../config/env';
+import { serverConfig } from '../config/env.server';
 import { SecurityMonitor } from './securityHeaders';
 
 export interface JWTPayload {
@@ -274,7 +275,7 @@ export class JWTUtils {
   private static async sign(data: string): Promise<string> {
     try {
       // Get secret key from config
-      const secret = config.security.sessionSecret;
+      const secret = serverConfig.security.sessionSecret;
       const encoder = new TextEncoder();
       
       // Import key

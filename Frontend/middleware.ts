@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { config as appConfig } from './src/config/env';
+import { serverConfig } from './src/config/env.server';
 import { SecurityHeaders, SecurityMonitor } from './src/utils/securityHeaders';
 import { InputValidator, OperationRateLimit } from './src/utils/validation';
 

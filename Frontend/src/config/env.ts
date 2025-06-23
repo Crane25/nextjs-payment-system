@@ -21,26 +21,14 @@ export const config = {
     domain: process.env.NEXT_PUBLIC_DOMAIN || 'scjsnext.com'
   },
   
-  // Security Configuration - Production Safe Values
+  // Security Configuration - Client-safe values only
   security: {
-    // Rate limiting
-    rateLimitMaxRequests: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '100'),
-    rateLimitWindowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '900000'),
+    // Rate limiting (client-safe)
+    rateLimitMaxRequests: parseInt(process.env.NEXT_PUBLIC_RATE_LIMIT_MAX_REQUESTS || '100'),
+    rateLimitWindowMs: parseInt(process.env.NEXT_PUBLIC_RATE_LIMIT_WINDOW_MS || '900000'),
     
-    // Session security - REQUIRED environment variables
-    sessionSecret: process.env.SESSION_SECRET || (() => {
-      if (process.env.NODE_ENV === 'production') {
-        throw new Error('SESSION_SECRET environment variable is required in production');
-      }
-      return 'development-session-secret-' + Math.random().toString(36).substring(2, 15);
-    })(),
-    csrfSecret: process.env.CSRF_SECRET || (() => {
-      if (process.env.NODE_ENV === 'production') {
-        throw new Error('CSRF_SECRET environment variable is required in production');
-      }
-      return 'development-csrf-secret-' + Math.random().toString(36).substring(2, 15);
-    })(),
-    sessionTimeout: parseInt(process.env.SESSION_TIMEOUT_MS || '3600000'),
+    // Session timeout (client-safe)
+    sessionTimeout: parseInt(process.env.NEXT_PUBLIC_SESSION_TIMEOUT_MS || '3600000'),
     
     // Security headers
     securityHeadersEnabled: process.env.SECURITY_HEADERS_ENABLED !== 'false',
@@ -123,20 +111,8 @@ export const config = {
     enableGeoBlocking: process.env.ENABLE_GEO_BLOCKING === 'true',
     allowedCountries: process.env.ALLOWED_COUNTRIES?.split(',') || [],
     
-    // Data protection - REQUIRED environment variables
-    encryptionEnabled: process.env.ENCRYPTION_ENABLED !== 'false',
-    encryptionKey: process.env.ENCRYPTION_KEY || (() => {
-      if (process.env.NODE_ENV === 'production') {
-        throw new Error('ENCRYPTION_KEY environment variable is required in production');
-      }
-      return 'development-encryption-key-' + Math.random().toString(36).substring(2, 15);
-    })(),
-    hashSalt: process.env.HASH_SALT || (() => {
-      if (process.env.NODE_ENV === 'production') {
-        throw new Error('HASH_SALT environment variable is required in production');
-      }
-      return 'development-hash-salt-' + Math.random().toString(36).substring(2, 15);
-    })(),
+    // Data protection (client-safe flags only)
+    encryptionEnabled: process.env.NEXT_PUBLIC_ENCRYPTION_ENABLED !== 'false',
     
     // Database security
     dbConnectionTimeout: parseInt(process.env.DB_CONNECTION_TIMEOUT || '30000'),
