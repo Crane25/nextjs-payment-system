@@ -407,4 +407,17 @@ export class OperationRateLimit {
     const remaining = record.resetTime - Date.now();
     return Math.max(0, remaining);
   }
+  
+  /**
+   * Reset rate limit for an identifier and operation
+   */
+  static resetLimit(identifier: string, operation: string): void {
+    const key = `${operation}:${identifier}`;
+    this.attempts.delete(key);
+    
+    SecurityMonitor.logEvent('rate_limit_reset', { 
+      identifier: identifier.substring(0, 3) + '***', // Partial identifier for privacy
+      operation 
+    }, 'low');
+  }
 } 

@@ -22,6 +22,7 @@ import { usePermission } from '../../hooks/usePermission';
 import { useMultiTeam } from '../../hooks/useMultiTeam';
 import { collection, getDocs, onSnapshot, query, orderBy, limit, startAfter, where, Query, QuerySnapshot, DocumentData } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
+import { getWithdrawStatistics, isAggregationSupported } from '../../utils/aggregation';
 import toast from 'react-hot-toast';
 
 interface WithdrawRecord {
@@ -71,14 +72,20 @@ export default function WithdrawHistory() {
   const paginationCache = useRef<Map<number, WithdrawRecord[]>>(new Map());
   const cursorCache = useRef<Map<number, any>>(new Map());
   
-  // Summary statistics
+  // Summary statistics with caching
   const [allTimeStats, setAllTimeStats] = useState({
     totalAmount: 0,
     totalTransactions: 0,
     completedTransactions: 0,
     todayAmount: 0,
-    todayTransactions: 0
+    todayTransactions: 0,
+    averageAmount: 0,
+    isPartialStats: false
   });
+  const [statsLoading, setStatsLoading] = useState(false);
+  const [lastStatsUpdate, setLastStatsUpdate] = useState<Date | null>(null);
+  const statsCache = useRef<any>(null);
+  const STATS_CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
 
   // Loading function
   const loadWithdrawHistory = useCallback(async (forceRefresh = false, page = 1) => {
@@ -131,14 +138,10 @@ export default function WithdrawHistory() {
         }
       }
 
-      const [withdrawSnapshot, teamsSnapshot, usersSnapshot, allStatsSnapshot] = await Promise.all([
+      const [withdrawSnapshot, teamsSnapshot, usersSnapshot] = await Promise.all([
         getDocs(withdrawQuery),
         getDocs(collection(db, 'teams')),
-        getDocs(collection(db, 'users')),
-        page === 1 || forceRefresh ? getDocs(query(
-          collection(db, 'withdrawHistory'),
-          orderBy('timestamp', 'desc')
-        )) : Promise.resolve(null)
+        getDocs(collection(db, 'users'))
       ]);
 
       const teamsMap = new Map();
@@ -207,38 +210,9 @@ export default function WithdrawHistory() {
       setWithdrawHistory(filteredRecords);
       setCurrentPage(page);
 
-      if (allStatsSnapshot && (page === 1 || forceRefresh)) {
-        const allRecords = allStatsSnapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        })) as WithdrawRecord[];
-
-        const userAccessibleRecords = allRecords.filter(record => 
-          record.teamId && userTeamIds.includes(record.teamId)
-        );
-
-        const totalAmount = userAccessibleRecords.reduce((sum, record) => sum + (record.amount || 0), 0);
-        const completedRecords = userAccessibleRecords.filter(record => record.status === 'completed');
-        const completedAmount = completedRecords.reduce((sum, record) => sum + (record.amount || 0), 0);
-
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        const todayRecords = userAccessibleRecords.filter(record => {
-          const recordDate = new Date(record.timestamp);
-          return recordDate >= today;
-        });
-        const todayAmount = todayRecords.reduce((sum, record) => sum + (record.amount || 0), 0);
-
-        setAllTimeStats({
-          totalAmount: completedAmount,
-          totalTransactions: userAccessibleRecords.length,
-          completedTransactions: completedRecords.length,
-          todayAmount: todayAmount,
-          todayTransactions: todayRecords.length
-        });
-
-        setTotalItems(userAccessibleRecords.length);
-        setTotalPages(Math.ceil(userAccessibleRecords.length / itemsPerPage));
+      // Load statistics using Aggregation API with caching
+      if (page === 1 || forceRefresh) {
+        await loadWithdrawStatistics(userTeamIds, forceRefresh);
       }
 
       setLastUpdated(new Date());
@@ -253,6 +227,124 @@ export default function WithdrawHistory() {
       setLastUpdated(new Date()); // อัพเดทเวลาหลังจากโหลดเสร็จ
     }
   }, [user, userProfile, teamsLoading, teams, itemsPerPage]);
+
+  // Load statistics with caching and aggregation API
+  const loadWithdrawStatistics = useCallback(async (userTeamIds: string[], forceRefresh = false) => {
+    const now = Date.now();
+    const cacheValid = lastStatsUpdate && (now - lastStatsUpdate.getTime()) < STATS_CACHE_DURATION;
+    
+    // Use cache if valid and not forcing refresh
+    if (!forceRefresh && cacheValid && statsCache.current) {
+      setAllTimeStats(statsCache.current.stats);
+      setTotalItems(statsCache.current.totalItems);
+      setTotalPages(Math.ceil(statsCache.current.totalItems / itemsPerPage));
+      return;
+    }
+    
+    try {
+      setStatsLoading(true);
+      
+      // Try Aggregation API first
+      if (isAggregationSupported()) {
+        try {
+          const aggregatedStats = await getWithdrawStatistics(userTeamIds);
+          
+          const newStats = {
+            totalAmount: aggregatedStats.totalAmount,
+            totalTransactions: aggregatedStats.totalTransactions,
+            completedTransactions: aggregatedStats.completedTransactions,
+            todayAmount: aggregatedStats.todayAmount,
+            todayTransactions: aggregatedStats.todayTransactions,
+            averageAmount: aggregatedStats.averageAmount,
+            isPartialStats: aggregatedStats.isPartialStats
+          };
+          
+          // Cache the results
+          statsCache.current = {
+            stats: newStats,
+            totalItems: aggregatedStats.totalTransactions,
+            timestamp: now
+          };
+          
+          setAllTimeStats(newStats);
+          setTotalItems(aggregatedStats.totalTransactions);
+          setTotalPages(Math.ceil(aggregatedStats.totalTransactions / itemsPerPage));
+          setLastStatsUpdate(new Date());
+          
+          return;
+        } catch (aggregationError) {
+        }
+      }
+      
+      // Fallback to traditional method with LIMIT
+      const allStatsQuery = query(
+        collection(db, 'withdrawHistory'),
+        orderBy('timestamp', 'desc'),
+        limit(10000) // Prevent exceeding Firestore limits
+      );
+      
+      const allStatsSnapshot = await getDocs(allStatsQuery);
+      const allRecords = allStatsSnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as WithdrawRecord[];
+      
+      const userAccessibleRecords = allRecords.filter(record => 
+        record.teamId && userTeamIds.includes(record.teamId)
+      );
+      
+      const totalAmount = userAccessibleRecords.reduce((sum, record) => sum + (record.amount || 0), 0);
+      const completedRecords = userAccessibleRecords.filter(record => record.status === 'completed');
+      const completedAmount = completedRecords.reduce((sum, record) => sum + (record.amount || 0), 0);
+      
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const todayRecords = userAccessibleRecords.filter(record => {
+        const recordDate = new Date(record.timestamp);
+        return recordDate >= today;
+      });
+      const todayAmount = todayRecords.reduce((sum, record) => sum + (record.amount || 0), 0);
+      
+      const newStats = {
+        totalAmount: completedAmount,
+        totalTransactions: userAccessibleRecords.length,
+        completedTransactions: completedRecords.length,
+        todayAmount: todayAmount,
+        todayTransactions: todayRecords.length,
+        averageAmount: userAccessibleRecords.length > 0 ? totalAmount / userAccessibleRecords.length : 0,
+        isPartialStats: allStatsSnapshot.docs.length >= 10000 // Indicates if we hit the limit
+      };
+      
+      // Cache the results
+      statsCache.current = {
+        stats: newStats,
+        totalItems: userAccessibleRecords.length,
+        timestamp: now
+      };
+      
+      setAllTimeStats(newStats);
+      setTotalItems(userAccessibleRecords.length);
+      setTotalPages(Math.ceil(userAccessibleRecords.length / itemsPerPage));
+      setLastStatsUpdate(new Date());
+      
+      if (newStats.isPartialStats) {
+        toast('⚠️ แสดงสถิติจากข้อมูล 10,000 รายการล่าสุด', {
+          duration: 4000,
+          position: 'top-right',
+          style: {
+            background: '#fbbf24',
+            color: '#000'
+          }
+        });
+      }
+      
+    } catch (error) {
+      console.error('❌ Error loading withdraw statistics:', error);
+      toast.error('ไม่สามารถโหลดสถิติได้');
+    } finally {
+      setStatsLoading(false);
+    }
+  }, [itemsPerPage, lastStatsUpdate]);
 
   // Utility functions
   const goToPage = (page: number) => {
@@ -624,6 +716,7 @@ export default function WithdrawHistory() {
               </svg>
             </div>
           </div>
+
         </div>
 
         {/* Filters */}

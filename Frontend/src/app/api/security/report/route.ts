@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { config } from '../../../../config/env';
 import { InputValidator, OperationRateLimit } from '../../../../utils/validation';
+import { JWTUtils, withJWTAuth, withRoleAuth } from '../../../../utils/jwt';
 
 // In production, you would store these in a database or send to a monitoring service
 const securityEvents: Array<{
@@ -214,7 +215,7 @@ export async function GET(request: NextRequest) {
 
     // In production, validate the actual token against your auth system
     // For now, we'll do basic validation
-    if (!isValidAuthToken(token)) {
+    if (!(await isValidAuthToken(token))) {
       return NextResponse.json(
         { error: 'Invalid or expired token' },
         { status: 401 }
@@ -334,19 +335,25 @@ function isValidIP(ip: string): boolean {
   return ipv4Regex.test(ip) || ipv6Regex.test(ip);
 }
 
-function isValidAuthToken(token: string): boolean {
-  // In production, implement proper token validation
-  // This is a placeholder implementation
-  
-  // Check for obvious invalid tokens
-  if (token.includes('<script>') || token.includes('javascript:')) {
+async function isValidAuthToken(token: string): Promise<boolean> {
+  try {
+    // Use our JWT validation utility
+    const validation = await JWTUtils.validateToken(token);
+    
+    if (!validation.isValid) {
+      return false;
+    }
+    
+    // Check if user has permission to access security reports
+    const payload = validation.payload!;
+    const hasPermission = payload.role === 'admin' || 
+                         (payload.permissions ? payload.permissions.includes('security:read') : false);
+    
+    return hasPermission;
+  } catch (error) {
+    console.error('Token validation error:', error);
     return false;
   }
-  
-  // Add your actual token validation logic here
-  // For example: JWT validation, database lookup, etc.
-  
-  return true; // Placeholder - implement actual validation
 }
 
 function sanitizeEventData(data: any): any {

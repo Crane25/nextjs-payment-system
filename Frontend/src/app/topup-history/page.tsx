@@ -22,6 +22,7 @@ import { usePermission } from '../../hooks/usePermission';
 import { useMultiTeam } from '../../hooks/useMultiTeam';
 import { collection, getDocs, onSnapshot, query, orderBy, limit, startAfter, where, Query, QuerySnapshot, DocumentData } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
+import { getTopupStatistics, isAggregationSupported } from '../../utils/aggregation';
 import toast from 'react-hot-toast';
 
 interface TopupRecord {
@@ -147,7 +148,33 @@ export default function TopupHistory() {
     totalTransactions: 0,
     completedTransactions: 0,
     todayAmount: 0,
-    todayTransactions: 0
+    todayTransactions: 0,
+    averageAmount: 0,
+    isPartialStats: false
+  });
+
+  // Performance optimizations - Statistics caching
+  const statsCache = useRef<{
+    data: typeof allTimeStats | null;
+    expiry: number;
+    userTeamIds: string[];
+  }>({ 
+    data: null, 
+    expiry: 0, 
+    userTeamIds: [] 
+  });
+  
+  // Performance monitoring
+  const performanceRef = useRef<{
+    loadStartTime: number;
+    totalQueryTime: number;
+    cacheHits: number;
+    cacheMisses: number;
+  }>({
+    loadStartTime: 0,
+    totalQueryTime: 0,
+    cacheHits: 0,
+    cacheMisses: 0
   });
 
 
@@ -175,6 +202,7 @@ export default function TopupHistory() {
 
     try {
       isLoadingRef.current = true;
+      performanceRef.current.loadStartTime = performance.now();
       
       if (forceRefresh) {
         setRefreshing(true);
@@ -182,6 +210,8 @@ export default function TopupHistory() {
         lastDocRef.current = null;
         paginationCache.current.clear(); // Clear cache on refresh
         cursorCache.current.clear(); // Clear cursor cache on refresh
+        // Clear stats cache on force refresh
+        statsCache.current = { data: null, expiry: 0, userTeamIds: [] };
       } else {
         setLoading(true);
       }
@@ -239,17 +269,42 @@ export default function TopupHistory() {
         }
       }
 
+      // Check if we can use cached statistics
+      const currentUserTeamIds = teams.map(team => team.id);
+      const now = Date.now();
+      const STATS_CACHE_DURATION = 5 * 60 * 1000; // 5 minutes cache
+      
+      let shouldLoadStats = false;
+      let cachedStats = null;
+      
+      if (page === 1 || forceRefresh) {
+        const cacheValid = statsCache.current.expiry > now && 
+                          JSON.stringify(statsCache.current.userTeamIds) === JSON.stringify(currentUserTeamIds);
+        
+        if (cacheValid && statsCache.current.data && !forceRefresh) {
+          cachedStats = statsCache.current.data;
+          performanceRef.current.cacheHits++;
+        } else {
+          shouldLoadStats = true;
+          performanceRef.current.cacheMisses++;
+        }
+      }
+
       // Execute queries in parallel - optimize for performance
+      const queryStartTime = performance.now();
       const [topupSnapshot, teamsSnapshot, usersSnapshot, allStatsSnapshot] = await Promise.all([
         getDocs(topupQuery), // For pagination
         getDocs(collection(db, 'teams')),
         getDocs(collection(db, 'users')),
-        // Get all records for accurate statistics (only on first load or refresh)
-        page === 1 || forceRefresh ? getDocs(query(
+        // Get limited records for accurate statistics (with performance optimization)
+        shouldLoadStats ? getDocs(query(
           collection(db, 'topupHistory'),
-          orderBy('timestamp', 'desc')
+          orderBy('timestamp', 'desc'),
+          limit(10000) // Maximum allowed by Firestore
         )) : Promise.resolve(null)
       ]);
+      
+      performanceRef.current.totalQueryTime += performance.now() - queryStartTime;
 
       // Create efficient lookup maps
       const teamsMap = new Map();
@@ -362,77 +417,122 @@ export default function TopupHistory() {
       
       setLastUpdated(new Date());
       
-      // Calculate accurate statistics from ALL data (not just current page)
-      if ((page === 1 || forceRefresh) && allStatsSnapshot) {
-        const userTeamIds = teams.map(team => team.id);
-        const today = new Date().toDateString();
-        
-        // Process all records for accurate statistics
-        const allRecords = allStatsSnapshot.docs.map((doc: any) => {
-          const data = doc.data();
+      // Use cached statistics or calculate new ones
+      if (page === 1 || forceRefresh) {
+        if (cachedStats) {
+          // Use cached statistics
+          setAllTimeStats(cachedStats);
+        } else {
+          // Try Firestore Aggregation API first, fallback to manual calculation
+          try {
+            if (isAggregationSupported()) {
+              const aggregatedStats = await getTopupStatistics(currentUserTeamIds);
+              
+              setAllTimeStats(aggregatedStats);
+              
+              // Cache the aggregated statistics
+              statsCache.current = {
+                data: aggregatedStats,
+                expiry: now + STATS_CACHE_DURATION,
+                userTeamIds: currentUserTeamIds
+              };
+            } else {
+              throw new Error('Aggregation API not supported');
+            }
+          } catch (aggregationError) {
+            
+            // Fallback to manual calculation if aggregation fails
+            if (allStatsSnapshot) {
+          // Calculate new statistics with performance optimization
+          const userTeamIds = teams.map(team => team.id);
+          const today = new Date().toDateString();
           
-          // Get team info from map (O(1) lookup)
-          let teamName = 'ไม่ระบุทีม';
-          if (data.teamId && teamsMap.has(data.teamId)) {
-            const teamData = teamsMap.get(data.teamId);
-            teamName = teamData.name || `ทีม ${data.teamId.substring(0, 8)}`;
-          } else if (data.teamId) {
-            teamName = `ทีม ${data.teamId.substring(0, 8)}`;
+          // Process limited records for statistics (still accurate for recent data)
+          const allRecords = allStatsSnapshot.docs.map((doc: any) => {
+            const data = doc.data();
+            
+            // Get team info from map (O(1) lookup)
+            let teamName = 'ไม่ระบุทีม';
+            if (data.teamId && teamsMap.has(data.teamId)) {
+              const teamData = teamsMap.get(data.teamId);
+              teamName = teamData.name || `ทีม ${data.teamId.substring(0, 8)}`;
+            } else if (data.teamId) {
+              teamName = `ทีม ${data.teamId.substring(0, 8)}`;
+            }
+            
+            return {
+              ...data,
+              teamName,
+              timestamp: data.timestamp,
+              amount: data.amount || 0,
+              status: data.status || 'pending',
+              teamId: data.teamId
+            };
+          });
+          
+          // Filter records based on user permissions
+          let relevantRecords;
+          if (userProfile.role === 'admin') {
+            // Admin: เห็นเฉพาะข้อมูลทีมที่ตัวเองเป็นสมาชิก (เหมือน Manager)
+            relevantRecords = allRecords.filter((record: any) => 
+              record.teamId && userTeamIds.includes(record.teamId)
+            );
+          } else {
+            relevantRecords = allRecords.filter((record: any) => 
+              record.teamId && userTeamIds.includes(record.teamId)
+            );
           }
           
-          return {
-            ...data,
-            teamName,
-            timestamp: data.timestamp,
-            amount: data.amount || 0,
-            status: data.status || 'pending',
-            teamId: data.teamId
+          // Calculate statistics from relevant data (limited to 10,000 most recent records)
+          // Note: For datasets > 10,000 records, this shows statistics for the most recent 10,000 records
+          const totalAmount = relevantRecords.reduce((sum: number, record: any) => sum + (record.amount || 0), 0);
+          const totalTransactions = relevantRecords.length;
+          const completedTransactions = relevantRecords.filter((record: any) => record.status === 'completed').length;
+          
+          // Add indicator if we're likely showing partial statistics
+          const isPartialStats = allStatsSnapshot.docs.length >= 10000;
+          
+          // Calculate today's statistics
+          const todayRecords = relevantRecords.filter((record: any) => {
+            const recordDate = new Date(record.timestamp);
+            return recordDate.toDateString() === today;
+          });
+          
+          const todayAmount = todayRecords.reduce((sum: number, record: any) => sum + (record.amount || 0), 0);
+          const todayTransactions = todayRecords.length;
+          
+          const newStats = {
+            totalAmount,
+            totalTransactions,
+            completedTransactions,
+            todayAmount,
+            todayTransactions,
+            averageAmount: totalTransactions > 0 ? totalAmount / totalTransactions : 0,
+            isPartialStats // เพิ่ม flag บอกว่าเป็นข้อมูลบางส่วน
           };
-        });
-        
-        // Filter records based on user permissions
-        let relevantRecords;
-        if (userProfile.role === 'admin') {
-          // Admin: เห็นเฉพาะข้อมูลทีมที่ตัวเองเป็นสมาชิก (เหมือน Manager)
-          relevantRecords = allRecords.filter((record: any) => 
-            record.teamId && userTeamIds.includes(record.teamId)
-          );
-        } else {
-          relevantRecords = allRecords.filter((record: any) => 
-            record.teamId && userTeamIds.includes(record.teamId)
-          );
+          
+          setAllTimeStats(newStats);
+          
+          // Cache the statistics for 5 minutes
+          statsCache.current = {
+            data: newStats,
+            expiry: now + STATS_CACHE_DURATION,
+            userTeamIds: currentUserTeamIds
+          };
+            }
+          }
         }
-        
-        // Calculate accurate statistics from ALL relevant data
-        const totalAmount = relevantRecords.reduce((sum: number, record: any) => sum + (record.amount || 0), 0);
-        const totalTransactions = relevantRecords.length;
-        const completedTransactions = relevantRecords.filter((record: any) => record.status === 'completed').length;
-        
-        // Calculate today's statistics from ALL relevant data
-        const todayRecords = relevantRecords.filter((record: any) => {
-          const recordDate = new Date(record.timestamp);
-          return recordDate.toDateString() === today;
-        });
-        
-        const todayAmount = todayRecords.reduce((sum: number, record: any) => sum + (record.amount || 0), 0);
-        const todayTransactions = todayRecords.length;
-        
-        setAllTimeStats({
-          totalAmount,
-          totalTransactions,
-          completedTransactions,
-          todayAmount,
-          todayTransactions
-        });
       }
       
     } catch (error) {
       // Error loading topup history
+      console.error('Error loading topup history:', error);
       toast.error('ไม่สามารถโหลดประวัติการเติมเงินได้');
     } finally {
       setLoading(false);
       setRefreshing(false);
       isLoadingRef.current = false;
+      
     }
   }, [user, userProfile, teams, teamsLoading, itemsPerPage]);
 
@@ -508,14 +608,14 @@ export default function TopupHistory() {
 
 
 
-  // Real-time listener for new topup records (ทำงานตลอดเวลา)
+  // Optimized real-time listener for new topup records (ทำงานตลอดเวลา)
   useEffect(() => {
     if (!user || !userProfile || teamsLoading) return;
 
     let unsubscribe: (() => void) | null = null;
     let isInitialLoad = true;
 
-    // Set up real-time listener for topupHistory collection
+    // Set up real-time listener for topupHistory records (simple version for compatibility)
     unsubscribe = onSnapshot(
       collection(db, 'topupHistory'), 
       (snapshot) => {
@@ -529,17 +629,32 @@ export default function TopupHistory() {
         const newRecords = snapshot.docChanges().filter(change => change.type === 'added');
         
         if (newRecords.length > 0) {
-          // Check if any new records are relevant to current user
+          // Check if any new records are relevant to current user and recent
           const userTeamIds = teams.map(team => team.id);
+          const twentyFourHoursAgo = new Date();
+          twentyFourHoursAgo.setHours(twentyFourHoursAgo.getHours() - 24);
+          
           const relevantNewRecords = newRecords.filter(change => {
             const data = change.doc.data();
             
-            if (userProfile.role === 'admin') return true;
+            // Check if record is recent (within 24 hours)
+            const recordTime = new Date(data.timestamp);
+            if (recordTime < twentyFourHoursAgo) {
+              return false;
+            }
+            
+            if (userProfile.role === 'admin') {
+              // Admin: เห็นเฉพาะข้อมูลทีมที่ตัวเองเป็นสมาชิก
+              return data.teamId && userTeamIds.includes(data.teamId);
+            }
             
             return data.teamId && userTeamIds.includes(data.teamId);
           });
 
           if (relevantNewRecords.length > 0) {
+            // Invalidate stats cache when new records arrive
+            statsCache.current = { data: null, expiry: 0, userTeamIds: [] };
+            
             // Reload data to get the new records
             loadTopupHistory(true);
             
@@ -555,7 +670,10 @@ export default function TopupHistory() {
         }
       },
       (error) => {
-        // Real-time listener error
+        // Real-time listener error - log only in development
+        if (process.env.NODE_ENV === 'development') {
+          console.error('Real-time listener error:', error);
+        }
       }
     );
 
@@ -746,8 +864,11 @@ export default function TopupHistory() {
           <div className="bg-gradient-to-r from-green-500 to-emerald-600 rounded-2xl p-6 text-white">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-green-100 text-sm font-medium">เติมเงินทั้งหมด</p>
+                <p className="text-green-100 text-sm font-medium">
+                  เติมเงินทั้งหมด{allTimeStats.isPartialStats ? ' (10K รายการล่าสุด)' : ''}
+                </p>
                 <p className="text-2xl font-bold">
+                  {allTimeStats.isPartialStats && <span className="text-lg">~</span>}
                   ฿{allTimeStats.totalAmount.toLocaleString('th-TH', { 
                     minimumFractionDigits: 2, 
                     maximumFractionDigits: 2 
@@ -776,8 +897,13 @@ export default function TopupHistory() {
           <div className="bg-gradient-to-r from-blue-500 to-cyan-600 rounded-2xl p-6 text-white">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-blue-100 text-sm font-medium">รายการทั้งหมด</p>
-                <p className="text-2xl font-bold">{allTimeStats.totalTransactions.toLocaleString()}</p>
+                <p className="text-blue-100 text-sm font-medium">
+                  รายการทั้งหมด{allTimeStats.isPartialStats ? ' (10K ล่าสุด)' : ''}
+                </p>
+                <p className="text-2xl font-bold">
+                  {allTimeStats.isPartialStats && <span className="text-lg">~</span>}
+                  {allTimeStats.totalTransactions.toLocaleString()}
+                </p>
               </div>
               <ClockIcon className="h-8 w-8 text-blue-200" />
             </div>
@@ -794,6 +920,7 @@ export default function TopupHistory() {
               </svg>
             </div>
           </div>
+
         </div>
 
         {/* Filters and Search */}
@@ -994,9 +1121,15 @@ export default function TopupHistory() {
               </div>
             </div>
             <div className="flex items-center gap-3">
-              {/* Last updated indicator */}
-              <div className="text-xs text-gray-500 dark:text-gray-400">
-                อัพเดทล่าสุด: {lastUpdated.toLocaleTimeString('th-TH')}
+              {/* Performance indicator and last updated */}
+              <div className="flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400">
+                <div>อัพเดทล่าสุด: {lastUpdated.toLocaleTimeString('th-TH')}</div>
+                {process.env.NODE_ENV === 'development' && (
+                  <div className="flex items-center gap-1">
+                    <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
+                    <span>Cache: {performanceRef.current.cacheHits}H/{performanceRef.current.cacheMisses}M</span>
+                  </div>
+                )}
               </div>
 
               {/* Manual refresh button */}

@@ -119,41 +119,208 @@ export function generateCSRFToken(): string {
 }
 
 /**
- * Secure session storage
+ * Secure session storage with proper encryption
  */
 export class SecureStorage {
   private static readonly PREFIX = 'secure_';
   
-  static setItem(key: string, value: string): void {
+  /**
+   * Encrypt data using AES-GCM with Web Crypto API
+   */
+  private static async encrypt(data: string): Promise<string> {
     try {
-      const encryptedValue = btoa(value); // Basic encoding (in production, use proper encryption)
-      sessionStorage.setItem(this.PREFIX + key, encryptedValue);
+      const key = await this.getEncryptionKey();
+      const encoder = new TextEncoder();
+      const dataBuffer = encoder.encode(data);
+      
+      // Generate random IV
+      const iv = crypto.getRandomValues(new Uint8Array(12));
+      
+      // Encrypt the data
+      const encrypted = await crypto.subtle.encrypt(
+        { name: 'AES-GCM', iv },
+        key,
+        dataBuffer
+      );
+      
+      // Combine IV and encrypted data
+      const combined = new Uint8Array(iv.length + encrypted.byteLength);
+      combined.set(iv);
+      combined.set(new Uint8Array(encrypted), iv.length);
+      
+      // Convert to base64 for storage
+      return btoa(String.fromCharCode.apply(null, Array.from(combined)));
     } catch (error) {
-      // Failed to store secure item - security issue
+      console.error('Encryption failed:', error);
+      // Fallback to base64 encoding if encryption fails
+      return btoa(data);
     }
   }
   
-  static getItem(key: string): string | null {
+  /**
+   * Decrypt data using AES-GCM with Web Crypto API
+   */
+  private static async decrypt(encryptedData: string): Promise<string> {
+    try {
+      const key = await this.getEncryptionKey();
+      
+      // Convert from base64
+      const combined = new Uint8Array(
+        atob(encryptedData).split('').map(char => char.charCodeAt(0))
+      );
+      
+      // Extract IV and encrypted data
+      const iv = combined.slice(0, 12);
+      const encrypted = combined.slice(12);
+      
+      // Decrypt the data
+      const decrypted = await crypto.subtle.decrypt(
+        { name: 'AES-GCM', iv },
+        key,
+        encrypted
+      );
+      
+      // Convert back to string
+      const decoder = new TextDecoder();
+      return decoder.decode(decrypted);
+    } catch (error) {
+      console.error('Decryption failed:', error);
+      // Fallback to base64 decoding if decryption fails
+      try {
+        return atob(encryptedData);
+      } catch {
+        return '';
+      }
+    }
+  }
+  
+  /**
+   * Get or generate encryption key
+   */
+  private static async getEncryptionKey(): Promise<CryptoKey> {
+    const keyId = 'secure_storage_key';
+    
+    // Try to get existing key from IndexedDB (if available)
+    if (typeof window !== 'undefined' && 'indexedDB' in window) {
+      try {
+        const storedKey = await this.getStoredKey(keyId);
+        if (storedKey) return storedKey;
+      } catch {
+        // Continue to generate new key
+      }
+    }
+    
+    // Generate new key
+    const key = await crypto.subtle.generateKey(
+      { name: 'AES-GCM', length: 256 },
+      true,
+      ['encrypt', 'decrypt']
+    );
+    
+    // Store key for future use
+    if (typeof window !== 'undefined' && 'indexedDB' in window) {
+      try {
+        await this.storeKey(keyId, key);
+      } catch {
+        // Continue without storing key
+      }
+    }
+    
+    return key;
+  }
+  
+  /**
+   * Store encryption key in IndexedDB
+   */
+  private static async storeKey(keyId: string, key: CryptoKey): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open('SecureStorageKeys', 1);
+      
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        const db = request.result;
+        const transaction = db.transaction(['keys'], 'readwrite');
+        const store = transaction.objectStore('keys');
+        
+        store.put({ id: keyId, key }, keyId);
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error);
+      };
+      
+      request.onupgradeneeded = () => {
+        const db = request.result;
+        if (!db.objectStoreNames.contains('keys')) {
+          db.createObjectStore('keys');
+        }
+      };
+    });
+  }
+  
+  /**
+   * Retrieve encryption key from IndexedDB
+   */
+  private static async getStoredKey(keyId: string): Promise<CryptoKey | null> {
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open('SecureStorageKeys', 1);
+      
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        const db = request.result;
+        const transaction = db.transaction(['keys'], 'readonly');
+        const store = transaction.objectStore('keys');
+        const getRequest = store.get(keyId);
+        
+        getRequest.onsuccess = () => {
+          const result = getRequest.result;
+          resolve(result ? result.key : null);
+        };
+        getRequest.onerror = () => resolve(null);
+      };
+    });
+  }
+  
+  static async setItem(key: string, value: string): Promise<void> {
+    try {
+      const encryptedValue = await this.encrypt(value);
+      sessionStorage.setItem(this.PREFIX + key, encryptedValue);
+      SecurityMonitor.logEvent('secure_storage_write', { key }, 'low');
+    } catch (error) {
+      SecurityMonitor.logEvent('secure_storage_write_failed', { key, error: error instanceof Error ? error.message : 'Unknown' }, 'medium');
+      throw new Error('Failed to store secure item');
+    }
+  }
+  
+  static async getItem(key: string): Promise<string | null> {
     try {
       const encryptedValue = sessionStorage.getItem(this.PREFIX + key);
-      return encryptedValue ? atob(encryptedValue) : null;
+      if (!encryptedValue) return null;
+      
+      const decryptedValue = await this.decrypt(encryptedValue);
+      SecurityMonitor.logEvent('secure_storage_read', { key }, 'low');
+      return decryptedValue;
     } catch (error) {
-      // Failed to retrieve secure item
+      SecurityMonitor.logEvent('secure_storage_read_failed', { key, error: error instanceof Error ? error.message : 'Unknown' }, 'medium');
       return null;
     }
   }
   
   static removeItem(key: string): void {
     sessionStorage.removeItem(this.PREFIX + key);
+    SecurityMonitor.logEvent('secure_storage_remove', { key }, 'low');
   }
   
   static clear(): void {
     const keys = Object.keys(sessionStorage);
+    const removedKeys: string[] = [];
+    
     keys.forEach(key => {
       if (key.startsWith(this.PREFIX)) {
         sessionStorage.removeItem(key);
+        removedKeys.push(key);
       }
     });
+    
+    SecurityMonitor.logEvent('secure_storage_clear', { removedCount: removedKeys.length }, 'medium');
   }
 }
 
@@ -234,8 +401,8 @@ export function getSecurityAuditReport(): {
 /**
  * Enhanced session validation
  */
-export function validateSession(): boolean {
-  const sessionData = SecureStorage.getItem('user_session');
+export async function validateSession(): Promise<boolean> {
+  const sessionData = await SecureStorage.getItem('user_session');
   
   if (!sessionData) {
     SecurityMonitor.logEvent('session_validation_failed', { reason: 'no_session' }, 'low');
@@ -254,7 +421,7 @@ export function validateSession(): boolean {
     
     // Extend session if valid
     session.expiresAt = now + config.security.sessionTimeout;
-    SecureStorage.setItem('user_session', JSON.stringify(session));
+    await SecureStorage.setItem('user_session', JSON.stringify(session));
     
     return true;
   } catch (error) {
