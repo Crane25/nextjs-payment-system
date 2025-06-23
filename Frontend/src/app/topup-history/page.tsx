@@ -53,9 +53,80 @@ export default function TopupHistory() {
   const [refreshing, setRefreshing] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState<'all' | 'completed' | 'pending' | 'failed'>('all');
-  const [filterPeriod, setFilterPeriod] = useState<'all' | 'today' | 'week' | 'month'>('all');
+  const [filterPeriod, setFilterPeriod] = useState<'all' | 'today' | 'week' | 'month' | 'custom'>('all');
   const [selectedTeamFilter, setSelectedTeamFilter] = useState<'all' | string>('all');
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
+  
+  // Date range filter states
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+  const [showDateFilter, setShowDateFilter] = useState(false);
+
+  // Helper functions for date filtering
+  const setDateRange = (range: 'today' | 'yesterday' | 'thisWeek' | 'lastWeek' | 'thisMonth' | 'lastMonth') => {
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    
+    switch (range) {
+      case 'today':
+        // วันนี้ 00:00 ถึง 23:59
+        const todayStart = new Date(today);
+        todayStart.setHours(0, 0, 0, 0);
+        const todayEnd = new Date(today);
+        todayEnd.setHours(23, 59, 59, 999);
+        setStartDate(todayStart.toISOString().slice(0, 16));
+        setEndDate(todayEnd.toISOString().slice(0, 16));
+        break;
+      case 'yesterday':
+        // เมื่อวาน 00:00 ถึง 23:59
+        const yesterday = new Date(today);
+        yesterday.setDate(yesterday.getDate() - 1);
+        const yesterdayStart = new Date(yesterday);
+        yesterdayStart.setHours(0, 0, 0, 0);
+        const yesterdayEnd = new Date(yesterday);
+        yesterdayEnd.setHours(23, 59, 59, 999);
+        setStartDate(yesterdayStart.toISOString().slice(0, 16));
+        setEndDate(yesterdayEnd.toISOString().slice(0, 16));
+        break;
+      case 'thisWeek':
+        // สัปดาห์นี้ (วันอาทิตย์ 00:00 ถึงปัจจุบัน)
+        const startOfWeek = new Date(today);
+        startOfWeek.setDate(today.getDate() - today.getDay());
+        startOfWeek.setHours(0, 0, 0, 0);
+        const nowTime = new Date();
+        setStartDate(startOfWeek.toISOString().slice(0, 16));
+        setEndDate(nowTime.toISOString().slice(0, 16));
+        break;
+      case 'lastWeek':
+        // สัปดาห์ที่แล้ว (วันอาทิตย์ 00:00 ถึงวันเสาร์ 23:59)
+        const lastWeekStart = new Date(today);
+        lastWeekStart.setDate(today.getDate() - today.getDay() - 7);
+        lastWeekStart.setHours(0, 0, 0, 0);
+        const lastWeekEnd = new Date(lastWeekStart);
+        lastWeekEnd.setDate(lastWeekStart.getDate() + 6);
+        lastWeekEnd.setHours(23, 59, 59, 999);
+        setStartDate(lastWeekStart.toISOString().slice(0, 16));
+        setEndDate(lastWeekEnd.toISOString().slice(0, 16));
+        break;
+      case 'thisMonth':
+        // เดือนนี้ (วันที่ 1 00:00 ถึงปัจจุบัน)
+        const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+        startOfMonth.setHours(0, 0, 0, 0);
+        const nowMonth = new Date();
+        setStartDate(startOfMonth.toISOString().slice(0, 16));
+        setEndDate(nowMonth.toISOString().slice(0, 16));
+        break;
+      case 'lastMonth':
+        // เดือนที่แล้ว (วันที่ 1 00:00 ถึงวันสุดท้าย 23:59)
+        const lastMonthStart = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+        lastMonthStart.setHours(0, 0, 0, 0);
+        const lastMonthEnd = new Date(today.getFullYear(), today.getMonth(), 0);
+        lastMonthEnd.setHours(23, 59, 59, 999);
+        setStartDate(lastMonthStart.toISOString().slice(0, 16));
+        setEndDate(lastMonthEnd.toISOString().slice(0, 16));
+        break;
+    }
+  };
   
   // Pagination states - Improved for large datasets
   const [currentPage, setCurrentPage] = useState(1);
@@ -526,6 +597,20 @@ export default function TopupHistory() {
             const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
             matchesPeriod = recordDate >= monthAgo;
             break;
+          case 'custom':
+            // Custom date range filter with time support
+            if (startDate && endDate) {
+              const start = new Date(startDate);
+              const end = new Date(endDate);
+              matchesPeriod = recordDate >= start && recordDate <= end;
+            } else if (startDate) {
+              const start = new Date(startDate);
+              matchesPeriod = recordDate >= start;
+            } else if (endDate) {
+              const end = new Date(endDate);
+              matchesPeriod = recordDate <= end;
+            }
+            break;
         }
       }
       
@@ -786,15 +871,101 @@ export default function TopupHistory() {
 
               <select
                 value={filterPeriod}
-                onChange={(e) => setFilterPeriod(e.target.value as any)}
+                onChange={(e) => {
+                  const value = e.target.value as any;
+                  setFilterPeriod(value);
+                  setShowDateFilter(value === 'custom');
+                  if (value !== 'custom') {
+                    setStartDate('');
+                    setEndDate('');
+                  }
+                }}
                 className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
               >
                 <option value="all">ช่วงเวลาทั้งหมด</option>
                 <option value="today">วันนี้</option>
                 <option value="week">7 วันที่ผ่านมา</option>
                 <option value="month">30 วันที่ผ่านมา</option>
+                <option value="custom">กำหนดเอง</option>
               </select>
+
+              {/* Date Range Filter - Compact & Clean */}
+              {showDateFilter && (
+                <>
+                  <div className="flex items-center space-x-2">
+                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300 whitespace-nowrap">
+                      จาก:
+                    </label>
+                    <input
+                      type="datetime-local"
+                      value={startDate}
+                      onChange={(e) => setStartDate(e.target.value)}
+                      onBlur={(e) => {
+                        const value = e.target.value;
+                        if (value && value.length >= 10) {
+                          const date = value.split('T')[0];
+                          const time = value.split('T')[1];
+                          // ถ้าไม่มีเวลาหรือเวลาไม่ครบ ให้ตั้งเป็น 00:00
+                          if (!time || time === '' || time.length < 5) {
+                            setStartDate(`${date}T00:00`);
+                          }
+                        }
+                      }}
+                      onFocus={(e) => {
+                        // เมื่อ focus ถ้ายังไม่มีค่า ให้ตั้งเป็นวันนี้ 00:00
+                        if (!e.target.value) {
+                          const today = new Date().toISOString().split('T')[0];
+                          setStartDate(`${today}T00:00`);
+                        }
+                      }}
+                      className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+                    />
+                  </div>
+
+                  <div className="flex items-center space-x-2">
+                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300 whitespace-nowrap">
+                      ถึง:
+                    </label>
+                    <input
+                      type="datetime-local"
+                      value={endDate}
+                      onChange={(e) => setEndDate(e.target.value)}
+                      onBlur={(e) => {
+                        const value = e.target.value;
+                        if (value && value.length >= 10) {
+                          const date = value.split('T')[0];
+                          const time = value.split('T')[1];
+                          // ถ้าไม่มีเวลาหรือเวลาไม่ครบ ให้ตั้งเป็น 23:59
+                          if (!time || time === '' || time.length < 5) {
+                            setEndDate(`${date}T23:59`);
+                          }
+                        }
+                      }}
+                      onFocus={(e) => {
+                        // เมื่อ focus ถ้ายังไม่มีค่า ให้ตั้งเป็นวันนี้ 23:59
+                        if (!e.target.value) {
+                          const today = new Date().toISOString().split('T')[0];
+                          setEndDate(`${today}T23:59`);
+                        }
+                      }}
+                      className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+                    />
+                  </div>
+
+                  <button
+                    onClick={() => {
+                      setStartDate('');
+                      setEndDate('');
+                    }}
+                    className="px-3 py-2 text-sm text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 bg-red-50 hover:bg-red-100 dark:bg-red-900/20 dark:hover:bg-red-900/30 rounded-lg transition-colors"
+                  >
+                    ล้าง
+                  </button>
+                </>
+              )}
             </div>
+
+
           </div>
         </div>
 

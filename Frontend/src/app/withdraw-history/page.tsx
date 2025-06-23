@@ -51,8 +51,10 @@ export default function WithdrawHistory() {
   const [refreshing, setRefreshing] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState<'all' | 'completed' | 'pending' | 'failed'>('all');
-  const [filterPeriod, setFilterPeriod] = useState<'all' | 'today' | 'week' | 'month'>('all');
+  const [filterPeriod, setFilterPeriod] = useState<'all' | 'today' | 'week' | 'month' | 'custom'>('all');
   const [selectedTeamFilter, setSelectedTeamFilter] = useState<'all' | string>('all');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
   const [isConnected, setIsConnected] = useState(true);
   
@@ -316,22 +318,43 @@ export default function WithdrawHistory() {
     }
 
     if (filterPeriod !== 'all') {
-      const now = new Date();
-      const filterDate = new Date();
-      
-      switch (filterPeriod) {
-        case 'today':
-          filterDate.setHours(0, 0, 0, 0);
-          break;
-        case 'week':
-          filterDate.setDate(now.getDate() - 7);
-          break;
-        case 'month':
-          filterDate.setDate(now.getDate() - 30);
-          break;
+      if (filterPeriod === 'custom') {
+        // Custom date range filtering
+        if (startDate || endDate) {
+          filtered = filtered.filter(record => {
+            const recordDate = new Date(record.timestamp);
+            const start = startDate ? new Date(startDate) : null;
+            const end = endDate ? new Date(endDate) : null;
+            
+            if (start && end) {
+              return recordDate >= start && recordDate <= end;
+            } else if (start) {
+              return recordDate >= start;
+            } else if (end) {
+              return recordDate <= end;
+            }
+            return true;
+          });
+        }
+      } else {
+        // Existing period filters
+        const now = new Date();
+        const filterDate = new Date();
+        
+        switch (filterPeriod) {
+          case 'today':
+            filterDate.setHours(0, 0, 0, 0);
+            break;
+          case 'week':
+            filterDate.setDate(now.getDate() - 7);
+            break;
+          case 'month':
+            filterDate.setDate(now.getDate() - 30);
+            break;
+        }
+        
+        filtered = filtered.filter(record => new Date(record.timestamp) >= filterDate);
       }
-      
-      filtered = filtered.filter(record => new Date(record.timestamp) >= filterDate);
     }
 
     // เรียงลำดับตาม timestamp ล่าสุดก่อน (real-time sorting)
@@ -686,7 +709,102 @@ export default function WithdrawHistory() {
                 <option value="today">วันนี้</option>
                 <option value="week">7 วันที่ผ่านมา</option>
                 <option value="month">30 วันที่ผ่านมา</option>
+                <option value="custom">กำหนดเอง</option>
               </select>
+
+              {/* Custom Date Range */}
+              {filterPeriod === 'custom' && (
+                <div className="flex items-center space-x-2 bg-orange-50 dark:bg-orange-900/20 p-3 rounded-lg border border-orange-200 dark:border-orange-800">
+                  <div className="flex items-center space-x-2">
+                    <label className="text-sm font-medium text-orange-700 dark:text-orange-300">
+                      จาก:
+                    </label>
+                    <input
+                      type="datetime-local"
+                      value={startDate}
+                      onChange={(e) => setStartDate(e.target.value)}
+                      onBlur={(e) => {
+                        const value = e.target.value;
+                        if (value && value.length >= 10) {
+                          const date = value.split('T')[0];
+                          const time = value.split('T')[1];
+                          // ถ้าไม่มีเวลาหรือเวลาไม่ครบ ให้ตั้งเป็น 00:00
+                          if (!time || time === '' || time.length < 5) {
+                            setStartDate(`${date}T00:00`);
+                          }
+                        }
+                      }}
+                      onFocus={(e) => {
+                        // เมื่อ focus ถ้ายังไม่มีค่า ให้ตั้งเป็นวันนี้ 00:00
+                        if (!e.target.value) {
+                          const today = new Date().toISOString().split('T')[0];
+                          setStartDate(`${today}T00:00`);
+                        }
+                      }}
+                      className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+                    />
+                    <button
+                      onClick={() => {
+                        const today = new Date().toISOString().split('T')[0];
+                        setStartDate(`${today}T00:00`);
+                      }}
+                      className="px-2 py-1 text-xs bg-orange-100 hover:bg-orange-200 dark:bg-orange-800 dark:hover:bg-orange-700 text-orange-600 dark:text-orange-300 rounded"
+                    >
+                      00:00
+                    </button>
+                  </div>
+                  
+                  <div className="flex items-center space-x-2">
+                    <label className="text-sm font-medium text-orange-700 dark:text-orange-300">
+                      ถึง:
+                    </label>
+                    <input
+                      type="datetime-local"
+                      value={endDate}
+                      onChange={(e) => setEndDate(e.target.value)}
+                      onBlur={(e) => {
+                        const value = e.target.value;
+                        if (value && value.length >= 10) {
+                          const date = value.split('T')[0];
+                          const time = value.split('T')[1];
+                          // ถ้าไม่มีเวลาหรือเวลาไม่ครบ ให้ตั้งเป็น 23:59
+                          if (!time || time === '' || time.length < 5) {
+                            setEndDate(`${date}T23:59`);
+                          }
+                        }
+                      }}
+                      onFocus={(e) => {
+                        // เมื่อ focus ถ้ายังไม่มีค่า ให้ตั้งเป็นวันนี้ 23:59
+                        if (!e.target.value) {
+                          const today = new Date().toISOString().split('T')[0];
+                          setEndDate(`${today}T23:59`);
+                        }
+                      }}
+                      className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+                    />
+                    <button
+                      onClick={() => {
+                        const today = new Date().toISOString().split('T')[0];
+                        setEndDate(`${today}T23:59`);
+                      }}
+                      className="px-2 py-1 text-xs bg-orange-100 hover:bg-orange-200 dark:bg-orange-800 dark:hover:bg-orange-700 text-orange-600 dark:text-orange-300 rounded"
+                    >
+                      23:59
+                    </button>
+                  </div>
+                  
+                  <button
+                    onClick={() => {
+                      setStartDate('');
+                      setEndDate('');
+                      setFilterPeriod('all');
+                    }}
+                    className="px-3 py-2 text-sm bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-400 rounded-lg transition-colors"
+                  >
+                    ล้าง
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         </div>
