@@ -10,13 +10,13 @@ WORKDIR /app
 
 # Copy package files
 COPY Frontend/package*.json ./
-RUN npm ci --only=production --no-audit --no-fund
+RUN npm ci --no-audit --no-fund
 
 # Stage 2: Builder
 FROM node:18-alpine AS builder
 WORKDIR /app
 
-# Copy dependencies
+# Copy dependencies and application code
 COPY --from=deps /app/node_modules ./node_modules
 COPY Frontend/ ./
 
