@@ -1,0 +1,127 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Users collection - ผู้ใช้สามารถอ่านเขียนข้อมูลตัวเองได้
+    match /users/{userId} {
+      // อ่านเขียนข้อมูลตัวเองได้
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+      // อนุญาตให้อ่านข้อมูลผู้ใช้อื่นได้ (สำหรับแสดงชื่อในทีม)
+      allow read: if request.auth != null;
+      // อนุญาตให้สร้างผู้ใช้ใหม่ได้
+      allow create: if request.auth != null;
+    }
+    
+    // Usernames collection - สำหรับ mapping username กับ uid
+    match /usernames/{username} {
+      // อนุญาตให้อ่านได้เพื่อตรวจสอบว่า username ซ้ำหรือไม่
+      allow read: if true;
+      // อนุญาตให้สร้างได้เมื่อมีการ authentication
+      allow create: if request.auth != null;
+      // อนุญาตให้แก้ไขได้เฉพาะเจ้าของ
+      allow update, delete: if request.auth != null && request.auth.uid == resource.data.uid;
+    }
+    
+    // Teams collection - เพิ่มความยืดหยุ่นสำหรับการจัดการทีม
+    match /teams/{teamId} {
+      // อนุญาตให้ผู้ใช้ที่ล็อกอินแล้วอ่านข้อมูลทีมได้
+      allow read: if request.auth != null;
+      
+      // สร้างทีมใหม่ได้
+      allow create: if request.auth != null;
+      
+      // แก้ไขทีมได้หากเป็นผู้ใช้ที่ล็อกอินแล้ว (ยืดหยุ่นขึ้น)
+      allow update: if request.auth != null;
+      
+      // ลบได้เฉพาะเจ้าของ
+      allow delete: if request.auth != null && 
+        resource != null && 
+        request.auth.uid in resource.data.get('owners', []);
+    }
+    
+    // Team Members collection - ปรับให้ยืดหยุ่นสูงสุด
+    match /teamMembers/{memberId} {
+      // อนุญาตให้ผู้ใช้ที่ล็อกอินแล้วจัดการสมาชิกได้
+      allow read, write: if request.auth != null;
+    }
+    
+    // All possible team-related collections
+    match /team/{teamId} {
+      allow read, write: if request.auth != null;
+    }
+    
+    match /teamInvitations/{invitationId} {
+      allow read, write: if request.auth != null;
+    }
+    
+    match /invitations/{invitationId} {
+      allow read, write: if request.auth != null;
+    }
+    
+    // Websites collection
+    match /websites/{websiteId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null;
+      allow update, delete: if request.auth != null &&
+        request.auth.uid == resource.data.userId;
+    }
+    
+    // User websites subcollection
+    match /users/{userId}/websites/{websiteId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+      allow create: if request.auth != null && request.auth.uid == userId;
+    }
+    
+    // Topup History
+    match /topupHistory/{historyId} {
+      allow read, write: if request.auth != null &&
+        request.auth.uid == resource.data.userId;
+      allow read: if request.auth != null;
+      allow create: if request.auth != null;
+    }
+    
+    // *** WITHDRAW HISTORY - เพิ่มใหม่ ***
+    match /withdrawHistory/{historyId} {
+      // อ่านได้หากล็อกอินแล้ว (เหมือน topupHistory)
+      allow read: if request.auth != null;
+      // สร้างได้หากล็อกอินแล้ว
+      allow create: if request.auth != null;
+      // แก้ไขได้หากเป็นเจ้าของธุรกรรม
+      allow update: if request.auth != null && request.auth.uid == resource.data.withdrawByUid;
+      // ลบได้หากเป็นเจ้าของธุรกรรม
+      allow delete: if request.auth != null && request.auth.uid == resource.data.withdrawByUid;
+    }
+    
+    // User topup history subcollection
+    match /users/{userId}/topupHistory/{historyId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+      allow create: if request.auth != null && request.auth.uid == userId;
+    }
+    
+    // System Logs
+    match /systemLogs/{logId} {
+      allow read, write: if request.auth != null;
+    }
+    
+    // User profiles
+    match /userProfiles/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+      allow read: if request.auth != null;
+      allow create: if request.auth != null;
+    }
+    
+    // Test collections
+    match /test/{testId} {
+      allow read, write: if request.auth != null;
+    }
+    
+    match /__test__/{testId} {
+      allow read, write: if true;
+    }
+    
+    // Development mode - เปิดใช้งานสำหรับ debug
+    match /{document=**} {
+      allow read, write: if request.auth != null;
+    }
+  }
+} 

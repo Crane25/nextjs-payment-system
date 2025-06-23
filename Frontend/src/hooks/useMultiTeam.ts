@@ -1,0 +1,278 @@
+import { useState, useEffect, useCallback } from 'react';
+import { collection, query, where, getDocs, doc, getDoc, documentId } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
+import { useAuth } from '@/contexts/AuthContext';
+import { useUserProfile } from '@/contexts/UserContext';
+import { usePermission } from './usePermission';
+
+export interface TeamData {
+  id: string;
+  name: string;
+  description: string;
+  createdAt: Date;
+  ownerId: string;
+  ownerName?: string; // ชื่อเจ้าของทีมปัจจุบัน
+  memberCount: number;
+  totalWebsites: number;
+  totalBalance: number;
+  dailyTopup: number;
+}
+
+// Cache system
+interface CacheData {
+  teams: TeamData[];
+  timestamp: number;
+}
+
+const cacheMap = new Map<string, CacheData>();
+const CACHE_DURATION = 30000; // 30 seconds
+
+export const useMultiTeam = (mode: 'all' | 'owned' = 'all') => {
+  const { user } = useAuth();
+  const { userProfile } = useUserProfile();
+  const { hasPermission } = usePermission();
+  const [teams, setTeams] = useState<TeamData[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchTeamsOptimized = useCallback(async (force = false) => {
+    if (!user || !userProfile) {
+      setLoading(false);
+      return;
+    }
+
+    // Check cache first
+    const cacheKey = `${user.uid}-${mode}`;
+    const cachedData = cacheMap.get(cacheKey);
+    if (!force && cachedData && Date.now() - cachedData.timestamp < CACHE_DURATION) {
+      setTeams(cachedData.teams);
+      setLoading(false);
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setError(null);
+      
+
+      
+      let teamsQuery;
+      let snapshot;
+
+      if (userProfile.role === 'admin') {
+        if (mode === 'owned') {
+          // Admin: ดูเฉพาะทีมที่ตัวเองเป็นเจ้าของ (สำหรับหน้า team management)
+          teamsQuery = query(
+            collection(db, 'teams'),
+            where('ownerId', '==', user.uid)
+          );
+          snapshot = await getDocs(teamsQuery);
+        } else {
+          // Admin: ดูทุกทีมที่ตัวเองเป็นสมาชิก (สำหรับ dashboard และ topup-history)
+          const membersQuery = query(
+            collection(db, 'teamMembers'),
+            where('email', '==', userProfile.email),
+            where('status', '==', 'active')
+          );
+          
+          const membersSnapshot = await getDocs(membersQuery);
+          const userTeamIds = membersSnapshot.docs.map(doc => doc.data().teamId);
+          
+          if (userTeamIds.length > 0) {
+            if (userTeamIds.length === 1) {
+              const teamDoc = await getDoc(doc(db, 'teams', userTeamIds[0]));
+              snapshot = { docs: teamDoc.exists() ? [teamDoc] : [] };
+            } else {
+              teamsQuery = query(
+                collection(db, 'teams'),
+                where(documentId(), 'in', userTeamIds)
+              );
+        snapshot = await getDocs(teamsQuery);
+            }
+          } else {
+            setTeams([]);
+            setLoading(false);
+            return;
+          }
+        }
+      } else if (userProfile.role === 'manager') {
+        if (mode === 'owned') {
+          // Manager: ดูเฉพาะทีมที่ตัวเองเป็นเจ้าของ (สำหรับหน้า team management)
+          teamsQuery = query(
+            collection(db, 'teams'),
+            where('ownerId', '==', user.uid)
+          );
+          snapshot = await getDocs(teamsQuery);
+        } else {
+          // Manager: ดูทุกทีมที่ตัวเองเป็นสมาชิก (สำหรับ dashboard และ topup-history)
+          const membersQuery = query(
+            collection(db, 'teamMembers'),
+            where('email', '==', userProfile.email),
+            where('status', '==', 'active')
+          );
+          
+          const membersSnapshot = await getDocs(membersQuery);
+          const userTeamIds = membersSnapshot.docs.map(doc => doc.data().teamId);
+          
+          if (userTeamIds.length > 0) {
+            if (userTeamIds.length === 1) {
+              const teamDoc = await getDoc(doc(db, 'teams', userTeamIds[0]));
+              snapshot = { docs: teamDoc.exists() ? [teamDoc] : [] };
+            } else {
+              teamsQuery = query(
+                collection(db, 'teams'),
+                where(documentId(), 'in', userTeamIds)
+              );
+              snapshot = await getDocs(teamsQuery);
+            }
+          } else {
+            setTeams([]);
+            setLoading(false);
+            return;
+          }
+        }
+      } else if (userProfile.role === 'user' && user) {
+        // User: ค้นหาทีมที่ตัวเองเป็นสมาชิก
+        const membersQuery = query(
+          collection(db, 'teamMembers'),
+          where('email', '==', userProfile.email),
+          where('status', '==', 'active')
+        );
+        
+        const membersSnapshot = await getDocs(membersQuery);
+        const userTeamIds = membersSnapshot.docs.map(doc => doc.data().teamId);
+        
+        if (userTeamIds.length > 0) {
+          // ดึงข้อมูลทีมทั้งหมดที่ user เป็นสมาชิก
+          if (userTeamIds.length === 1) {
+            // ถ้ามีทีมเดียว ใช้ getDoc
+            const teamDoc = await getDoc(doc(db, 'teams', userTeamIds[0]));
+            snapshot = { docs: teamDoc.exists() ? [teamDoc] : [] };
+          } else {
+            // ถ้ามีหลายทีม ใช้ query with documentId
+            teamsQuery = query(
+              collection(db, 'teams'),
+              where(documentId(), 'in', userTeamIds)
+            );
+            snapshot = await getDocs(teamsQuery);
+          }
+        } else {
+          // User: ไม่มีทีม
+          setTeams([]);
+          setLoading(false);
+          return;
+        }
+      } else {
+        // User: ไม่มีทีม
+        setTeams([]);
+        setLoading(false);
+        return;
+      }
+
+      if (!snapshot.docs.length) {
+        setTeams([]);
+        setLoading(false);
+        return;
+      }
+
+      // Batch queries - Execute all queries in parallel
+      const teamIds = snapshot.docs.map(doc => doc.id);
+      const ownerIds = Array.from(new Set(snapshot.docs.map(doc => doc.data().ownerId).filter(Boolean)));
+      
+      const [membersSnapshot, websitesSnapshot, ownersSnapshot] = await Promise.all([
+        getDocs(collection(db, 'teamMembers')),
+        getDocs(collection(db, 'websites')),
+        ownerIds.length > 0 ? getDocs(query(collection(db, 'users'), where(documentId(), 'in', ownerIds))) : Promise.resolve({ docs: [] })
+      ]);
+
+      // Create efficient lookup maps
+      const membersMap = new Map<string, number>();
+      membersSnapshot.docs.forEach(doc => {
+        const data = doc.data();
+        if (data.teamId && teamIds.includes(data.teamId)) {
+          membersMap.set(data.teamId, (membersMap.get(data.teamId) || 0) + 1);
+        }
+      });
+
+      // Create owners map for current display names
+      const ownersMap = new Map<string, string>();
+      ownersSnapshot.docs.forEach(doc => {
+        const userData = doc.data();
+        ownersMap.set(doc.id, userData.displayName || userData.email || 'ไม่ระบุชื่อ');
+      });
+
+      const websitesMap = new Map<string, { count: number; totalBalance: number; dailyTopup: number }>();
+      const today = new Date().toISOString().split('T')[0];
+      
+      websitesSnapshot.docs.forEach(doc => {
+        const data = doc.data();
+        if (data.teamId && teamIds.includes(data.teamId)) {
+          const existing = websitesMap.get(data.teamId) || { count: 0, totalBalance: 0, dailyTopup: 0 };
+          
+          existing.count += 1;
+          existing.totalBalance += data.balance || 0;
+          
+          // คำนวณยอดเติมรวมวันนี้
+          if (data.lastTopupDate === today) {
+            existing.dailyTopup += data.dailyTopup || 0;
+          }
+          
+          websitesMap.set(data.teamId, existing);
+        }
+      });
+
+      // Process teams with efficient lookups
+      const teamsData: TeamData[] = snapshot.docs.map(docSnap => {
+        const teamData = docSnap.data();
+        const teamId = docSnap.id;
+        
+        const memberCount = membersMap.get(teamId) || 0;
+        const websiteData = websitesMap.get(teamId) || { count: 0, totalBalance: 0, dailyTopup: 0 };
+        const ownerName = ownersMap.get(teamData.ownerId) || 'ไม่ระบุชื่อ';
+
+        return {
+          id: teamId,
+          name: teamData.name || 'ไม่ระบุชื่อ',
+          description: teamData.description || '',
+          createdAt: teamData.createdAt?.toDate() || new Date(),
+          ownerId: teamData.ownerId || '',
+          ownerName,
+          memberCount,
+          totalWebsites: websiteData.count,
+          totalBalance: websiteData.totalBalance,
+          dailyTopup: websiteData.dailyTopup
+        };
+      });
+
+
+
+      setTeams(teamsData);
+      
+      // Update cache
+      cacheMap.set(cacheKey, {
+        teams: teamsData,
+        timestamp: Date.now()
+      });
+      
+      setLoading(false);
+    } catch (err) {
+      setError('เกิดข้อผิดพลาดในการโหลดข้อมูลทีม');
+      setLoading(false);
+    }
+  }, [user, userProfile, hasPermission, mode]);
+
+  useEffect(() => {
+    fetchTeamsOptimized();
+  }, [user?.uid, userProfile?.role, mode]);
+
+  return {
+    teams,
+    loading,
+    error,
+    canViewTeams: hasPermission('teams', 'read') || !!userProfile?.teamId,
+    refreshTeams: () => {
+      cacheMap.clear(); // Clear all cache
+      fetchTeamsOptimized(true);
+    }
+  };
+}; 

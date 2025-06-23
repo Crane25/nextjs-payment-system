@@ -1,0 +1,16 @@
+node_modules/
+.next/
+.git/
+*.log
+.env.local
+dist/
+temp_deploy/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+coverage/
+.nyc_output/
+.cache/
+build/
+out/ 
