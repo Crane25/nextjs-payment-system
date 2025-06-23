@@ -101,25 +101,27 @@ export default function WithdrawHistory() {
     lastCacheTime.current.set(cacheKey, Date.now());
   }, []);
 
-  // Build server-side query with filters
+  // Build server-side query with filters (optimized to avoid composite indexes)
   const buildWithdrawQuery = useCallback((userTeamIds: string[], page: number) => {
+    // Use simple queries to avoid composite index requirements
+    // We'll do minimal server-side filtering and more client-side filtering
+    
     const constraints: any[] = [];
     
-    // Server-side filtering by team (most important filter)
+    // Only use the most selective filter to avoid composite index issues
+    // Priority: specific team > date range > status
+    
     if (selectedTeamFilter !== 'all') {
+      // Most selective: filter by specific team
       constraints.push(where('teamId', '==', selectedTeamFilter));
-    } else if (userTeamIds.length > 0) {
-      // Filter by user accessible teams (Firestore 'in' limit is 10)
-      constraints.push(where('teamId', 'in', userTeamIds.slice(0, 10)));
-    }
-
-    // Server-side filtering by status
-    if (filterStatus !== 'all') {
-      constraints.push(where('status', '==', filterStatus));
-    }
-
-    // Server-side filtering by date range (if period filter is set)
-    if (filterPeriod !== 'all' && filterPeriod !== 'custom') {
+      constraints.push(orderBy('timestamp', 'desc'));
+    } else if (filterPeriod === 'custom' && startDate && endDate) {
+      // Second priority: custom date range
+      constraints.push(where('timestamp', '>=', startDate));
+      constraints.push(where('timestamp', '<=', endDate));
+      constraints.push(orderBy('timestamp', 'desc'));
+    } else if (filterPeriod !== 'all' && filterPeriod !== 'custom') {
+      // Third priority: preset date ranges
       const now = new Date();
       let filterDate = new Date();
       
@@ -136,19 +138,13 @@ export default function WithdrawHistory() {
       }
       
       constraints.push(where('timestamp', '>=', filterDate.toISOString()));
-    } else if (filterPeriod === 'custom' && (startDate || endDate)) {
-      if (startDate && endDate) {
-        constraints.push(where('timestamp', '>=', startDate));
-        constraints.push(where('timestamp', '<=', endDate));
-      } else if (startDate) {
-        constraints.push(where('timestamp', '>=', startDate));
-      } else if (endDate) {
-        constraints.push(where('timestamp', '<=', endDate));
-      }
+      constraints.push(orderBy('timestamp', 'desc'));
+    } else {
+      // Fallback: simple query with just ordering
+      constraints.push(orderBy('timestamp', 'desc'));
     }
 
-    // Add ordering and pagination
-    constraints.push(orderBy('timestamp', 'desc'));
+    // Add pagination
     constraints.push(limit(itemsPerPage * page));
 
     return query(collection(db, 'withdrawHistory'), ...constraints);
@@ -295,7 +291,7 @@ export default function WithdrawHistory() {
       }
 
       // Process withdraw records with cached team and user mapping
-      const processedRecords = withdrawSnapshot.docs.map((doc: any) => {
+      const allProcessedRecords = withdrawSnapshot.docs.map((doc: any) => {
         const data = doc.data();
         
         // Get team name from cache
@@ -323,6 +319,34 @@ export default function WithdrawHistory() {
           withdrawByEmail,
           withdrawByUsername
         } as WithdrawRecord;
+      });
+
+      // Apply additional client-side filtering that we removed from server-side
+      const processedRecords = allProcessedRecords.filter((record: WithdrawRecord) => {
+        // Filter by user accessible teams
+        if (!record.teamId || !userTeamIds.includes(record.teamId)) {
+          return false;
+        }
+
+        // Filter by status (if not already filtered by server)
+        if (filterStatus !== 'all' && record.status !== filterStatus) {
+          return false;
+        }
+
+        // Additional date filtering for cases not handled by server
+        if (filterPeriod === 'custom' && (startDate || endDate)) {
+          const recordTime = new Date(record.timestamp).getTime();
+          
+          if (startDate && recordTime < new Date(startDate).getTime()) {
+            return false;
+          }
+          
+          if (endDate && recordTime > new Date(endDate).getTime()) {
+            return false;
+          }
+        }
+
+        return true;
       });
 
       // Cache the processed data
@@ -360,80 +384,95 @@ export default function WithdrawHistory() {
     const userTeamIds = teams.map(team => team.id);
     if (userTeamIds.length === 0) return;
 
-    // Listen only for new records (selective real-time)
+    // Listen only for new records (selective real-time) - simplified to avoid composite index
     const lastUpdateTime = lastUpdated.toISOString();
     const realtimeQuery = query(
       collection(db, 'withdrawHistory'),
       where('timestamp', '>', lastUpdateTime),
-      where('teamId', 'in', userTeamIds.slice(0, 10)), // Firestore limit
       orderBy('timestamp', 'desc'),
-      limit(5) // Only listen for few new records
+      limit(10) // Listen for more records since we'll filter client-side
     );
 
     realTimeUnsubscribe.current = onSnapshot(
       realtimeQuery,
       (snapshot) => {
-        setIsConnected(true);
+        // Use setTimeout to defer setState to avoid render conflicts
+        setTimeout(() => {
+          setIsConnected(true);
+        }, 0);
         
         if (!snapshot.empty) {
-          const newRecords = snapshot.docs.map(doc => {
-            const data = doc.data();
-            
-            // Use cached team/user data for real-time updates
-            let teamName = 'ไม่ระบุทีม';
-            if (data.teamId && teamsCache.current.has(data.teamId)) {
-              const teamData = teamsCache.current.get(data.teamId);
-              teamName = teamData.name || `ทีม ${data.teamId.substring(0, 8)}`;
-            }
-
-            let withdrawByEmail = '';
-            let withdrawByUsername = '';
-            if (data.withdrawByUid && usersCache.current.has(data.withdrawByUid)) {
-              const userData = usersCache.current.get(data.withdrawByUid);
-              withdrawByEmail = userData.email || '';
-              withdrawByUsername = userData.username || userData.email?.split('@')[0] || '';
-            }
-            
-            return {
-              id: doc.id,
-              ...data,
-              teamName,
-              withdrawByEmail,
-              withdrawByUsername
-            } as WithdrawRecord;
-          });
-
-          // Add new records to the beginning of current data
-          setWithdrawHistory(prev => {
-            const existingIds = new Set(prev.map(r => r.id));
-            const uniqueNewRecords = newRecords.filter(r => !existingIds.has(r.id));
-            
-            if (uniqueNewRecords.length > 0) {
-              // Clear cache to force reload on next page change
-              paginationCache.current.clear();
-              lastCacheTime.current.clear();
+          const newRecords = snapshot.docs
+            .map(doc => {
+              const data = doc.data();
               
-              toast.success(
-                `มีรายการถอนเงินใหม่ ${uniqueNewRecords.length} รายการ`,
-                {
-                  duration: 4000,
-                  position: 'top-right',
-                }
-              );
+              // Use cached team/user data for real-time updates
+              let teamName = 'ไม่ระบุทีม';
+              if (data.teamId && teamsCache.current.has(data.teamId)) {
+                const teamData = teamsCache.current.get(data.teamId);
+                teamName = teamData.name || `ทีม ${data.teamId.substring(0, 8)}`;
+              }
+
+              let withdrawByEmail = '';
+              let withdrawByUsername = '';
+              if (data.withdrawByUid && usersCache.current.has(data.withdrawByUid)) {
+                const userData = usersCache.current.get(data.withdrawByUid);
+                withdrawByEmail = userData.email || '';
+                withdrawByUsername = userData.username || userData.email?.split('@')[0] || '';
+              }
               
-              return [...uniqueNewRecords, ...prev];
-            }
+              return {
+                id: doc.id,
+                ...data,
+                teamName,
+                withdrawByEmail,
+                withdrawByUsername
+              } as WithdrawRecord;
+            })
+            .filter((record: WithdrawRecord) => {
+              // Filter to only include records from user's teams
+              return record.teamId && userTeamIds.includes(record.teamId);
+            });
+
+          // Add new records to the beginning of current data (defer to avoid render conflicts)
+          setTimeout(() => {
+            setWithdrawHistory(prev => {
+              const existingIds = new Set(prev.map(r => r.id));
+              const uniqueNewRecords = newRecords.filter(r => !existingIds.has(r.id));
+              
+              if (uniqueNewRecords.length > 0) {
+                // Clear cache to force reload on next page change
+                paginationCache.current.clear();
+                lastCacheTime.current.clear();
+                
+                // Show toast notification
+                setTimeout(() => {
+                  toast.success(
+                    `มีรายการถอนเงินใหม่ ${uniqueNewRecords.length} รายการ`,
+                    {
+                      duration: 4000,
+                      position: 'top-right',
+                    }
+                  );
+                }, 100);
+                
+                return [...uniqueNewRecords, ...prev];
+              }
+              
+              return prev;
+            });
             
-            return prev;
-          });
-          
-          setLastUpdated(new Date());
+            setLastUpdated(new Date());
+          }, 0);
         }
       },
       (error) => {
         console.error('Real-time listener error:', error);
-        setIsConnected(false);
-        toast.error('การเชื่อมต่อ Real-time ขัดข้อง');
+        // Use setTimeout to defer setState to avoid render conflicts
+        setTimeout(() => {
+          setIsConnected(false);
+          toast.error('การเชื่อมต่อ Real-time ขัดข้อง');
+        }, 0);
       }
     );
   }, [user, userProfile, teamsLoading, teams, lastUpdated]);
@@ -500,13 +539,16 @@ export default function WithdrawHistory() {
     }
   }, [user?.uid, userProfile?.role, teamsLoading, loadWithdrawHistory]);
 
-  // Real-time updates effect
+  // Real-time updates effect (with safer setup)
   useEffect(() => {
-    if (user && userProfile && !teamsLoading && withdrawHistory.length > 0) {
-      // Set up real-time listener after initial data load
+    if (user && userProfile && !teamsLoading && withdrawHistory.length > 0 && !loading) {
+      // Set up real-time listener after initial data load and loading is complete
       const timer = setTimeout(() => {
-        setupRealTimeUpdates();
-      }, 2000); // Wait 2 seconds after initial load
+        // Double check that component is still mounted and not loading
+        if (!loading && !refreshing) {
+          setupRealTimeUpdates();
+        }
+      }, 3000); // Wait 3 seconds after initial load to ensure stable state
 
       return () => {
         clearTimeout(timer);
@@ -515,11 +557,17 @@ export default function WithdrawHistory() {
         }
       };
     }
-  }, [user, userProfile, teamsLoading, withdrawHistory.length, setupRealTimeUpdates]);
+  }, [user, userProfile, teamsLoading, withdrawHistory.length, loading, refreshing, setupRealTimeUpdates]);
 
   // Filter change effect - reload data when server-side filters change
   useEffect(() => {
     if (user && userProfile && !teamsLoading) {
+      // Clean up real-time listener before filter change
+      if (realTimeUnsubscribe.current) {
+        realTimeUnsubscribe.current();
+        realTimeUnsubscribe.current = null;
+      }
+      
       // Clear cache and reload when filters change (except search term)
       paginationCache.current.clear();
       lastCacheTime.current.clear();
