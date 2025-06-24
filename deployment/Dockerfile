@@ -100,23 +100,13 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder --chown=nextjs:nodejs /app/package.json ./package.json
 
-# Create optimized start script
-RUN echo '#!/bin/sh\n\
-set -e\n\
-\n\
-echo "🚀 Starting Next.js Payment System v2.0..."\n\
-echo "📅 Started at: $(date)"\n\
-echo "🌍 Environment: $NODE_ENV"\n\
-echo "🔧 Node Version: $(node --version)"\n\
-\n\
-# Health check endpoint\n\
-echo "🏥 Health check: http://localhost:$PORT/api/health"\n\
-\n\
-# Start application\n\
-exec node server.js' > /app/start.sh
-
-RUN chmod +x /app/start.sh && \
-    chown nextjs:nodejs /app/start.sh
+# Create startup message script
+RUN echo 'echo "🚀 Starting Next.js Payment System v2.0..."' > /startup.sh && \
+    echo 'echo "📅 Started at: $(date)"' >> /startup.sh && \
+    echo 'echo "🌍 Environment: $NODE_ENV"' >> /startup.sh && \
+    echo 'echo "🔧 Node Version: $(node --version)"' >> /startup.sh && \
+    echo 'echo "🏥 Health check: http://localhost:$PORT/api/health"' >> /startup.sh && \
+    chmod +x /startup.sh
 
 # Set production environment variables
 ENV NODE_ENV=production
@@ -148,4 +138,4 @@ EXPOSE 3000
 ENTRYPOINT ["dumb-init", "--"]
 
 # Start application
-CMD ["/app/start.sh"]
+CMD ["sh", "-c", "/startup.sh && node server.js"]
