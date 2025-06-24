@@ -61,6 +61,10 @@ services:
       - app-data:/app/data
       - app-logs:/app/logs
     
+    # Port Mapping (for health checks from host)
+    ports:
+      - "3000:3000"
+    
     # Network Configuration
     networks:
       - payment-network
