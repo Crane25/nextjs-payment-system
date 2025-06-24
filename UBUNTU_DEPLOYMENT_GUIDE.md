@@ -17,6 +17,47 @@
 
 ---
 
+## 📝 สำหรับผู้เริ่มต้นที่ไม่คุ้นเคยกับ Git
+
+### 🤔 Git คืออะไร?
+Git เป็นเครื่องมือจัดการ source code ที่ช่วยให้คุณสามารถ:
+- **ดาวน์โหลดโค้ด** จาก GitHub/GitLab มาใช้บน server
+- **อัพเดตโค้ด** เมื่อมีการแก้ไขใหม่
+- **จัดการ version** ของโค้ดอย่างมีระบบ
+
+### 📋 คำสั่ง Git พื้นฐานที่ต้องรู้
+```bash
+# ตรวจสอบว่า Git ติดตั้งแล้วหรือไม่
+git --version
+
+# ดาวน์โหลดโค้ดจาก repository
+git clone https://github.com/USERNAME/REPOSITORY.git
+
+# ตรวจสอบสถานะไฟล์
+git status
+
+# ดูประวัติการแก้ไข
+git log --oneline -10
+
+# อัพเดตโค้ดล่าสุด
+git pull origin main
+
+# ดู URL ของ repository
+git remote -v
+```
+
+### 🚀 วิธีใช้งาน Git ในกรณีนี้
+1. **Clone repository**: ดาวน์โหลดโค้ดครั้งแรก
+2. **Pull updates**: อัพเดตโค้ดเมื่อมีการแก้ไขใหม่
+3. **Check status**: ตรวจสอบว่ามีไฟล์ใดถูกแก้ไขบ้าง
+
+### ⚠️ ข้อควรระวัง
+- **ไม่ต้องกลัว Git!** มันเป็นเครื่องมือที่ช่วยให้ชีวิตง่ายขึ้น
+- **สำรอง .env.local เสมอ** ก่อน git pull
+- **ใช้ HTTPS แทน SSH** ถ้าไม่มี SSH key setup
+
+---
+
 ## 🖥️ ข้อกำหนดระบบ
 
 ### Server Requirements:
@@ -40,20 +81,87 @@
 ssh root@167.172.65.185
 ```
 
-### 2. อัพโหลดโค้ดขึ้น Server
+### 2. ติดตั้ง Git และ Tools พื้นฐาน
 ```bash
-# สร้างโฟลเดอร์
-mkdir -p /var/www/scjsnext
+# อัพเดตระบบก่อน
+apt update && apt upgrade -y
 
-# วิธีที่ 1: ใช้ Git (ถ้ามี)
-cd /var/www
-git clone https://github.com/YOUR_USERNAME/paymentnew.git scjsnext
+# ติดตั้ง Git และ tools ที่จำเป็น
+apt install -y git curl wget nano vim htop net-tools unzip
 
-# วิธีที่ 2: อัพโหลดผ่าน SCP/FTP
-# scp -r ./paymentnew root@167.172.65.185:/var/www/scjsnext
+# ตรวจสอบ Git version
+git --version
 ```
 
-### 3. รันสคริปต์ติดตั้งอัตโนมัติ
+### 3. ตั้งค่า Git (ไม่บังคับ)
+```bash
+# ตั้งค่า Git config (ไม่บังคับ แต่แนะนำ)
+git config --global user.name "Your Name"
+git config --global user.email "your.email@example.com"
+git config --global init.defaultBranch main
+```
+
+### 4. อัพโหลดโค้ดขึ้น Server
+
+#### วิธีที่ 1: Clone จาก GitHub (แนะนำ)
+```bash
+# สร้างโฟลเดอร์
+mkdir -p /var/www
+cd /var/www
+
+# Clone repository (แทนที่ URL ด้วย repo จริงของคุณ)
+git clone https://github.com/Crane25/nextjs-payment-system.git scjsnext
+
+# เข้าไปในโฟลเดอร์
+cd scjsnext
+
+# ตรวจสอบ branch ปัจจุบัน
+git branch -a
+git status
+```
+
+#### วิธีที่ 2: อัพโหลดผ่าน SCP (ถ้าไม่มี Git repo)
+```bash
+# บนเครื่อง Local (ไม่ใช่บน server)
+scp -r ./paymentnew root@167.172.65.185:/var/www/scjsnext
+
+# หรือใช้ rsync (แนะนำกว่า)
+rsync -avz --progress ./paymentnew/ root@167.172.65.185:/var/www/scjsnext/
+```
+
+#### วิธีที่ 3: อัพโหลดผ่าน ZIP file
+```bash
+# บนเครื่อง Local - สร้าง ZIP file
+zip -r paymentnew.zip paymentnew/
+
+# อัพโหลด ZIP file
+scp paymentnew.zip root@167.172.65.185:/tmp/
+
+# บน Server - แตก ZIP file
+cd /var/www
+unzip /tmp/paymentnew.zip
+mv paymentnew scjsnext
+rm /tmp/paymentnew.zip
+```
+
+### 5. ตรวจสอบไฟล์ที่จำเป็น
+```bash
+cd /var/www/scjsnext
+
+# ตรวจสอบโครงสร้างโฟลเดอร์
+ls -la
+
+# ตรวจสอบไฟล์สำคัญ
+ls -la deployment/
+ls -la Frontend/
+
+# ตรวจสอบว่ามีไฟล์ deployment scripts
+ls -la deployment/ubuntu-deploy.sh
+ls -la deployment/docker-compose.yml
+ls -la deployment/Dockerfile
+```
+
+### 6. รันสคริปต์ติดตั้งอัตโนมัติ
 ```bash
 cd /var/www/scjsnext/deployment
 chmod +x ubuntu-deploy.sh
@@ -77,13 +185,42 @@ sudo ./ubuntu-deploy.sh
 <details>
 <summary>คลิกเพื่อดูขั้นตอนการติดตั้งแบบ Manual</summary>
 
-### 1. อัพเดตระบบ
+### 1. เตรียมระบบและติดตั้ง Git
 ```bash
+# เชื่อมต่อ server
+ssh root@167.172.65.185
+
+# อัพเดตระบบ
 apt update && apt upgrade -y
-apt install -y curl wget git ufw fail2ban htop
+
+# ติดตั้ง packages พื้นฐาน (รวมถึง Git)
+apt install -y git curl wget nano vim htop net-tools unzip ufw fail2ban
+
+# ตรวจสอบ Git version
+git --version
+
+# ตั้งค่า Git (ไม่บังคับ)
+git config --global user.name "Your Name"
+git config --global user.email "your.email@example.com"
 ```
 
-### 2. ติดตั้ง Docker
+### 2. ดาวน์โหลดโค้ด
+```bash
+# วิธีที่ 1: Clone จาก GitHub
+mkdir -p /var/www
+cd /var/www
+git clone https://github.com/Crane25/nextjs-payment-system.git scjsnext
+cd scjsnext
+
+# วิธีที่ 2: อัพโหลดผ่าน SCP (บน local machine)
+# scp -r ./paymentnew root@167.172.65.185:/var/www/scjsnext
+
+# ตรวจสอบไฟล์
+ls -la
+ls -la deployment/
+```
+
+### 3. ติดตั้ง Docker
 ```bash
 # ติดตั้ง Docker
 curl -fsSL https://get.docker.com -o get-docker.sh
@@ -99,7 +236,7 @@ curl -L "https://github.com/docker/compose/releases/latest/download/docker-compo
 chmod +x /usr/local/bin/docker-compose
 ```
 
-### 3. ตั้งค่า Firewall
+### 4. ตั้งค่า Firewall
 ```bash
 ufw --force reset
 ufw default deny incoming
@@ -110,7 +247,7 @@ ufw allow 443/tcp
 ufw --force enable
 ```
 
-### 4. เตรียม Environment File
+### 5. เตรียม Environment File
 ```bash
 cd /var/www/scjsnext
 cat > Frontend/.env.local << 'EOF'
@@ -136,7 +273,7 @@ EOF
 chmod 600 Frontend/.env.local
 ```
 
-### 5. Deploy Application
+### 6. Deploy Application
 ```bash
 cd deployment
 docker-compose down 2>/dev/null || true
@@ -241,11 +378,17 @@ docker-compose up -d --build --force-recreate
 ```
 
 ### การอัพเดตโค้ด
+
+#### วิธีที่ 1: ใช้ Git (แนะนำ)
 ```bash
 cd /var/www/scjsnext
 
 # สำรอง environment file
 cp Frontend/.env.local /tmp/env.backup
+
+# ตรวจสอบสถานะ Git
+git status
+git log --oneline -5
 
 # อัพเดตโค้ด
 git pull origin main
@@ -256,6 +399,27 @@ cp /tmp/env.backup Frontend/.env.local
 # รีบิลด์และรีสตาร์ท
 cd deployment
 docker-compose up -d --build --force-recreate
+```
+
+#### วิธีที่ 2: อัพโหลดไฟล์ใหม่
+```bash
+cd /var/www
+
+# สำรอง environment file
+cp scjsnext/Frontend/.env.local /tmp/env.backup
+
+# ลบโฟลเดอร์เก่า (ระวัง!)
+rm -rf scjsnext
+
+# อัพโหลดไฟล์ใหม่ (ใช้ SCP หรือ rsync)
+# scp -r ./paymentnew root@167.172.65.185:/var/www/scjsnext
+
+# คืนค่า environment
+cp /tmp/env.backup scjsnext/Frontend/.env.local
+
+# Deploy ใหม่
+cd scjsnext/deployment
+docker-compose up -d --build
 ```
 
 ---
@@ -302,6 +466,61 @@ nano Frontend/.env.local
 
 # รีบิลด์
 docker-compose up -d --build --force-recreate
+```
+
+### ปัญหา 5: Git ไม่ได้ติดตั้งหรือใช้งานไม่ได้
+```bash
+# ตรวจสอบว่า Git ติดตั้งแล้วหรือไม่
+git --version
+
+# ถ้ายังไม่มี ให้ติดตั้ง
+apt update
+apt install -y git
+
+# ตั้งค่า Git ใหม่
+git config --global user.name "Your Name"
+git config --global user.email "your.email@example.com"
+
+# ถ้า clone ไม่ได้ อาจเป็นปัญหา SSH key หรือ HTTPS
+# ลองใช้ HTTPS แทน SSH
+git clone https://github.com/USERNAME/REPO.git
+
+# หรือถ้าเป็น private repo ต้องใช้ personal access token
+```
+
+### ปัญหา 6: Git pull ไม่ได้ (conflict หรือ permissions)
+```bash
+# ตรวจสอบสถานะ
+cd /var/www/scjsnext
+git status
+
+# ถ้ามี conflicts ให้ reset hard (ระวัง! จะเสีย local changes)
+git reset --hard HEAD
+git pull origin main
+
+# หรือถ้าอยากเก็บ local changes
+git stash
+git pull origin main
+git stash pop
+
+# ถ้ามีปัญหา permissions
+chown -R root:root /var/www/scjsnext
+chmod -R 755 /var/www/scjsnext
+```
+
+### ปัญหา 7: ไม่มี repository หรือไม่รู้ Git URL
+```bash
+# ตรวจสอบ remote URL
+cd /var/www/scjsnext
+git remote -v
+
+# ถ้าไม่มี repository ให้ใช้วิธีอัพโหลดไฟล์แบบ manual
+# 1. ใช้ SCP/SFTP
+# 2. ใช้ ZIP file
+# 3. ใช้ rsync
+
+# ตัวอย่าง rsync (บน local machine)
+rsync -avz --progress --delete ./paymentnew/ root@167.172.65.185:/var/www/scjsnext/
 ```
 
 ---
