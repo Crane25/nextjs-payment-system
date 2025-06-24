@@ -115,15 +115,11 @@ export default function TeamManagement() {
     newApiKey: ''
   });
 
-  // Generate random API key with team name
-  const generateApiKey = (teamName: string = '') => {
+  // Generate random API key
+  const generateApiKey = () => {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-    // Clean team name for API key (remove spaces, special chars, keep only alphanumeric)
-    const cleanTeamName = teamName.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
-    const teamPrefix = cleanTeamName ? `${cleanTeamName}_` : '';
-    
-    let result = `ggg_${teamPrefix}`;
-    for (let i = 0; i < 24; i++) { // Reduced length to accommodate team name
+    let result = '';
+    for (let i = 0; i < 32; i++) { // Generate 32 character API key
       result += chars.charAt(Math.floor(Math.random() * chars.length));
     }
     return result;
@@ -131,7 +127,7 @@ export default function TeamManagement() {
 
   // Show reset API key modal
   const showResetApiKeyModal = (teamId: string, teamName: string) => {
-    const newApiKey = generateApiKey(teamName);
+    const newApiKey = generateApiKey();
     setResetApiKeyModal({
       show: true,
       teamId,
@@ -170,7 +166,7 @@ export default function TeamManagement() {
   // Generate API key for existing team without one
   const generateApiKeyForTeam = async (teamId: string, teamName: string) => {
     try {
-      const newApiKey = generateApiKey(teamName);
+      const newApiKey = generateApiKey();
       const teamRef = doc(db, 'teams', teamId);
       await updateDoc(teamRef, {
         apiKey: newApiKey,
@@ -912,7 +908,7 @@ export default function TeamManagement() {
         memberCount: 1,
         totalWebsites: 0,
         isActive: true,
-        apiKey: generateApiKey(newTeam.name.trim())
+        apiKey: generateApiKey()
       };
 
       const teamRef = await addDoc(collection(db, 'teams'), teamData);
