@@ -1131,10 +1131,22 @@ export default function TeamManagement() {
                     
                     {/* Team Info & API Key */}
                     <div className="mb-3 space-y-2">
-                      {/* Owner info */}
-                      <div className="flex items-center text-sm text-gray-600 dark:text-gray-400">
-                        <UsersIcon className="h-4 w-4 text-purple-500 mr-2" />
-                        <span>เจ้าของ: {team.ownerName || 'ไม่ระบุ'}</span>
+                      {/* Owner info & Statistics */}
+                      <div className="flex items-center justify-between text-sm text-gray-600 dark:text-gray-400">
+                        <div className="flex items-center">
+                          <UsersIcon className="h-4 w-4 text-purple-500 mr-2" />
+                          <span>เจ้าของ: {team.ownerName || 'ไม่ระบุ'}</span>
+                        </div>
+                        <div className="flex items-center space-x-4">
+                          <div className="flex items-center">
+                            <UsersIcon className="h-4 w-4 text-green-500 mr-1" />
+                            <span>{team.memberCount} สมาชิก</span>
+                          </div>
+                          <div className="flex items-center">
+                            <ChartBarIcon className="h-4 w-4 text-blue-500 mr-1" />
+                            <span>{team.totalWebsites} เว็บไซต์</span>
+                          </div>
+                        </div>
                       </div>
                       
                       {/* API Key section - single line */}
@@ -1206,17 +1218,6 @@ export default function TeamManagement() {
                       </div>
                     </div>
 
-                    {/* Statistics */}
-                    <div className="grid grid-cols-2 gap-2">
-                      <div className="flex items-center text-sm text-gray-600 dark:text-gray-400">
-                        <UsersIcon className="h-4 w-4 text-green-500 mr-2" />
-                        <span>{team.memberCount} สมาชิก</span>
-                      </div>
-                      <div className="flex items-center text-sm text-gray-600 dark:text-gray-400">
-                        <ChartBarIcon className="h-4 w-4 text-blue-500 mr-2" />
-                        <span>{team.totalWebsites} เว็บไซต์</span>
-                      </div>
-                    </div>
                   </div>
                 ))}
               </div>
