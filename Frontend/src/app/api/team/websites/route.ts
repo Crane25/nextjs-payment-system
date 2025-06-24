@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { collection, query, where, getDocs, doc, getDoc } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { adminDb } from '@/lib/firebase-admin';
 
 export async function GET(request: NextRequest) {
   try {
@@ -23,12 +22,10 @@ export async function GET(request: NextRequest) {
 
     // Find team by API key
     console.log('Querying teams with API key...');
-    const teamsQuery = query(
-      collection(db, 'teams'),
-      where('apiKey', '==', teamApiKey)
-    );
+    const teamsCollection = adminDb.collection('teams');
+    const teamsQuery = teamsCollection.where('apiKey', '==', teamApiKey);
     
-    const teamsSnapshot = await getDocs(teamsQuery);
+    const teamsSnapshot = await teamsQuery.get();
     console.log('Teams query result:', teamsSnapshot.size, 'teams found');
     
     if (teamsSnapshot.empty) {
@@ -45,13 +42,12 @@ export async function GET(request: NextRequest) {
     
     // Get websites for this team that are active
     console.log('Querying websites for team:', teamId);
-    const websitesQuery = query(
-      collection(db, 'websites'),
-      where('teamId', '==', teamId),
-      where('isActive', '==', true)
-    );
+    const websitesCollection = adminDb.collection('websites');
+    const websitesQuery = websitesCollection
+      .where('teamId', '==', teamId)
+      .where('isActive', '==', true);
     
-    const websitesSnapshot = await getDocs(websitesQuery);
+    const websitesSnapshot = await websitesQuery.get();
     console.log('Websites query result:', websitesSnapshot.size, 'websites found');
     
     // Format website data
