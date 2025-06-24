@@ -31,7 +31,10 @@ import {
   UsersIcon,
   ChartBarIcon,
   MagnifyingGlassIcon,
-  ChatBubbleLeftEllipsisIcon
+  ChatBubbleLeftEllipsisIcon,
+  KeyIcon,
+  ClipboardDocumentIcon,
+  ArrowPathIcon
 } from '@heroicons/react/24/outline';
 import { 
   logTeamCreated,
@@ -71,7 +74,7 @@ const TEAM_DATA_CACHE_DURATION = 60000; // 1 minute
 export default function TeamManagement() {
   const { userProfile, refreshUserProfile } = useUserProfile();
   const { canViewTeams, canManageTeams, isAdmin, isManager } = usePermission();
-  const { teams, loading: teamsLoading, refreshTeams } = useMultiTeam('owned');
+  const { teams, loading: teamsLoading, refreshTeams } = useMultiTeam('owned'); // แสดงเฉพาะทีมที่ตัวเองเป็นเจ้าของ
   
   const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
@@ -97,6 +100,110 @@ export default function TeamManagement() {
     name: '',
     description: ''
   });
+
+  // API Key management
+  const [showApiKey, setShowApiKey] = useState<{[teamId: string]: boolean}>({});
+  const [resetApiKeyModal, setResetApiKeyModal] = useState<{
+    show: boolean;
+    teamId: string;
+    teamName: string;
+    newApiKey: string;
+  }>({
+    show: false,
+    teamId: '',
+    teamName: '',
+    newApiKey: ''
+  });
+
+  // Generate random API key with team name
+  const generateApiKey = (teamName: string = '') => {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    // Clean team name for API key (remove spaces, special chars, keep only alphanumeric)
+    const cleanTeamName = teamName.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+    const teamPrefix = cleanTeamName ? `${cleanTeamName}_` : '';
+    
+    let result = `ggg_${teamPrefix}`;
+    for (let i = 0; i < 24; i++) { // Reduced length to accommodate team name
+      result += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return result;
+  };
+
+  // Show reset API key modal
+  const showResetApiKeyModal = (teamId: string, teamName: string) => {
+    const newApiKey = generateApiKey(teamName);
+    setResetApiKeyModal({
+      show: true,
+      teamId,
+      teamName,
+      newApiKey
+    });
+  };
+
+  // Reset API key for team
+  const confirmResetApiKey = async () => {
+    try {
+      const { teamId, newApiKey } = resetApiKeyModal;
+      const teamRef = doc(db, 'teams', teamId);
+      await updateDoc(teamRef, {
+        apiKey: newApiKey,
+        updatedAt: new Date().toISOString()
+      });
+
+      toast.success('รีเซ็ท API Key สำเร็จ');
+      setResetApiKeyModal({ show: false, teamId: '', teamName: '', newApiKey: '' });
+      refreshTeams(); // Refresh team data
+    } catch (error) {
+      console.error('Error resetting API key:', error);
+      toast.error('เกิดข้อผิดพลาดในการรีเซ็ท API Key');
+    }
+  };
+
+  // Toggle API key visibility
+  const toggleApiKeyVisibility = (teamId: string) => {
+    setShowApiKey(prev => ({
+      ...prev,
+      [teamId]: !prev[teamId]
+    }));
+  };
+
+  // Generate API key for existing team without one
+  const generateApiKeyForTeam = async (teamId: string, teamName: string) => {
+    try {
+      const newApiKey = generateApiKey(teamName);
+      const teamRef = doc(db, 'teams', teamId);
+      await updateDoc(teamRef, {
+        apiKey: newApiKey,
+        updatedAt: new Date().toISOString()
+      });
+
+      toast.success('สร้าง API Key สำเร็จ');
+      refreshTeams(); // Refresh team data
+    } catch (error) {
+      console.error('Error generating API key:', error);
+      toast.error('เกิดข้อผิดพลาดในการสร้าง API Key');
+    }
+  };
+
+  // Trim API key for display (remove prefix)
+  const getTrimmedApiKey = (apiKey: string) => {
+    // ตัดส่วนหน้า ggg_teamname_ ออก เหลือแค่ส่วนหลัง
+    const parts = apiKey.split('_');
+    if (parts.length >= 3) {
+      return parts.slice(2).join('_'); // เอาส่วนหลังจาก ggg_teamname_
+    }
+    return apiKey; // ถ้าไม่มี pattern ที่คาดหวัง ให้แสดงทั้งหมด
+  };
+
+  // Copy API key to clipboard (copy full key)
+  const copyApiKey = async (apiKey: string) => {
+    try {
+      await navigator.clipboard.writeText(apiKey); // คัดลอกคีย์เต็ม
+      toast.success('คัดลอก API Key สำเร็จ');
+    } catch (error) {
+      toast.error('ไม่สามารถคัดลอกได้');
+    }
+  };
 
   // Remove member modal
   const [removeMemberModal, setRemoveMemberModal] = useState<{show: boolean, memberId: string, memberEmail: string, memberName: string}>({
@@ -814,7 +921,8 @@ export default function TeamManagement() {
         updatedAt: new Date().toISOString(),
         memberCount: 1,
         totalWebsites: 0,
-        isActive: true
+        isActive: true,
+        apiKey: generateApiKey(newTeam.name.trim())
       };
 
       const teamRef = await addDoc(collection(db, 'teams'), teamData);
@@ -995,60 +1103,132 @@ export default function TeamManagement() {
                 {teams.map((team) => (
                   <div
                     key={team.id}
-                    className={`border rounded-lg p-4 cursor-pointer transition-all hover:shadow-md ${
+                    className={`relative border rounded-xl p-6 cursor-pointer transition-all duration-300 transform hover:scale-[1.02] hover:shadow-xl ${
                       selectedTeamId === team.id 
-                        ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 dark:border-blue-400' 
-                        : 'border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700'
+                        ? 'border-blue-500 bg-gradient-to-br from-blue-50 via-white to-blue-50 dark:from-blue-900/30 dark:via-gray-800 dark:to-blue-900/20 dark:border-blue-400 shadow-xl ring-2 ring-blue-200 dark:ring-blue-800' 
+                        : 'border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 hover:bg-gradient-to-br hover:from-gray-50 hover:to-white dark:hover:from-gray-700 dark:hover:to-gray-800 shadow-lg'
                     }`}
                     onClick={() => setSelectedTeamId(team.id)}
                   >
-                    <div className="flex items-start justify-between">
-                      <div className="flex items-center" onClick={() => setSelectedTeamId(team.id)}>
-                        <div className="flex-shrink-0">
-                          <BuildingOfficeIcon className="h-8 w-8 text-blue-500 dark:text-blue-400" />
+                    {/* Selected indicator overlay */}
+                    {selectedTeamId === team.id && (
+                      <div className="absolute -top-2 -right-2 w-6 h-6 bg-blue-500 rounded-full flex items-center justify-center ring-4 ring-white dark:ring-gray-800">
+                        <EyeIcon className="h-3 w-3 text-white" />
+                      </div>
+                    )}
+
+                    <div className="flex items-start justify-between mb-4">
+                      <div className="flex items-center flex-1" onClick={() => setSelectedTeamId(team.id)}>
+                        <div className="flex-shrink-0 p-3 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl shadow-lg">
+                          <BuildingOfficeIcon className="h-6 w-6 text-white" />
                         </div>
-                        <div className="ml-3">
-                          <h3 className="text-sm font-medium text-gray-900 dark:text-white">{team.name}</h3>
-                          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{team.description}</p>
+                        <div className="ml-4 flex-1">
+                          <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-1">{team.name}</h3>
+                          <p className="text-sm text-gray-600 dark:text-gray-400 line-clamp-2">{team.description || 'ไม่มีคำอธิบาย'}</p>
                         </div>
                       </div>
-                      <div className="flex items-center space-x-2">
-                      {selectedTeamId === team.id && (
-                        <EyeIcon className="h-5 w-5 text-blue-500 dark:text-blue-400" />
+                      
+                      {/* Delete team button - only for team owner */}
+                      {team.ownerId === userProfile?.uid && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            showDeleteTeamModal(team.id, team.name);
+                          }}
+                          className="ml-2 p-2 text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-all duration-300 transform hover:scale-110"
+                          title="ลบทีม"
+                        >
+                          <TrashIcon className="h-4 w-4" />
+                        </button>
                       )}
-                        {/* Delete team button - only for team owner */}
-                        {team.ownerId === userProfile?.uid && (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              showDeleteTeamModal(team.id, team.name);
-                            }}
-                            className="p-1 text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-md transition-colors"
-                            title="ลบทีม"
-                          >
-                            <TrashIcon className="h-4 w-4" />
-                          </button>
-                        )}
-                      </div>
                     </div>
                     
-                    <div className="mt-3 mb-2">
-                      <div className="flex items-center">
-                        <UsersIcon className="h-4 w-4 text-purple-500 dark:text-purple-400 mr-1" />
-                        <span className="text-xs text-purple-600 dark:text-purple-400">
-                          เจ้าของ: {team.ownerName || 'ไม่ระบุ'}
-                        </span>
+                    {/* Team Info & API Key */}
+                    <div className="mb-3 space-y-2">
+                      {/* Owner info */}
+                      <div className="flex items-center text-sm text-gray-600 dark:text-gray-400">
+                        <UsersIcon className="h-4 w-4 text-purple-500 mr-2" />
+                        <span>เจ้าของ: {team.ownerName || 'ไม่ระบุ'}</span>
+                      </div>
+                      
+                      {/* API Key section - single line */}
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center text-sm text-gray-600 dark:text-gray-400">
+                          <KeyIcon className="h-4 w-4 text-orange-500 mr-2" />
+                          <span>API Key:</span>
+                          {team.apiKey ? (
+                            <code className="ml-2 text-xs bg-gray-50 dark:bg-gray-800 px-2 py-1 rounded font-mono text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-600">
+                              {showApiKey[team.id] 
+                                ? getTrimmedApiKey(team.apiKey)
+                                : '•'.repeat(Math.min(getTrimmedApiKey(team.apiKey).length, 24))
+                              }
+                            </code>
+                          ) : (
+                            <span className="ml-2 text-xs text-amber-700 dark:text-amber-300">ยังไม่มี</span>
+                          )}
+                        </div>
+                        <div className="flex items-center space-x-1">
+                          {team.apiKey ? (
+                            <>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggleApiKeyVisibility(team.id);
+                                }}
+                                className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                                title={showApiKey[team.id] ? 'ซ่อน API Key' : 'แสดง API Key'}
+                              >
+                                {showApiKey[team.id] ? (
+                                  <EyeSlashIcon className="h-3.5 w-3.5 text-gray-500" />
+                                ) : (
+                                  <EyeIcon className="h-3.5 w-3.5 text-gray-500" />
+                                )}
+                              </button>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  copyApiKey(team.apiKey);
+                                }}
+                                className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                                title="คัดลอก API Key"
+                              >
+                                <ClipboardDocumentIcon className="h-3.5 w-3.5 text-gray-500" />
+                              </button>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  showResetApiKeyModal(team.id, team.name);
+                                }}
+                                className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                                title="รีเซ็ท API Key"
+                              >
+                                <ArrowPathIcon className="h-3.5 w-3.5 text-gray-500" />
+                              </button>
+                            </>
+                          ) : (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                generateApiKeyForTeam(team.id, team.name);
+                              }}
+                              className="text-xs bg-amber-600 hover:bg-amber-700 text-white px-2 py-0.5 rounded transition-colors"
+                            >
+                              สร้าง
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </div>
-                    
-                    <div className="mt-4 grid grid-cols-2 gap-4">
-                      <div className="flex items-center">
-                        <UsersIcon className="h-4 w-4 text-gray-400 dark:text-gray-500 mr-1" />
-                        <span className="text-xs text-gray-600 dark:text-gray-300">{team.memberCount} สมาชิก</span>
+
+                    {/* Statistics */}
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="flex items-center text-sm text-gray-600 dark:text-gray-400">
+                        <UsersIcon className="h-4 w-4 text-green-500 mr-2" />
+                        <span>{team.memberCount} สมาชิก</span>
                       </div>
-                      <div className="flex items-center">
-                        <ChartBarIcon className="h-4 w-4 text-gray-400 dark:text-gray-500 mr-1" />
-                        <span className="text-xs text-gray-600 dark:text-gray-300">{team.totalWebsites} เว็บไซต์</span>
+                      <div className="flex items-center text-sm text-gray-600 dark:text-gray-400">
+                        <ChartBarIcon className="h-4 w-4 text-blue-500 mr-2" />
+                        <span>{team.totalWebsites} เว็บไซต์</span>
                       </div>
                     </div>
                   </div>
@@ -1796,6 +1976,94 @@ export default function TeamManagement() {
                   <span>ลบทีม</span>
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reset API Key Modal */}
+      {resetApiKeyModal.show && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 backdrop-blur-sm flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-gray-900 rounded-2xl p-8 w-full max-w-lg mx-4 shadow-2xl border border-gray-200 dark:border-gray-700">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center">
+                <div className="p-3 bg-gradient-to-br from-orange-500 to-red-500 rounded-xl">
+                  <KeyIcon className="h-6 w-6 text-white" />
+                </div>
+                <div className="ml-4">
+                  <h3 className="text-xl font-bold text-gray-900 dark:text-white">
+                    รีเซ็ท API Key
+                  </h3>
+                  <p className="text-sm text-gray-600 dark:text-gray-400">
+                    ทีม: {resetApiKeyModal.teamName}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setResetApiKeyModal({ show: false, teamId: '', teamName: '', newApiKey: '' })}
+                className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
+              >
+                <XMarkIcon className="h-5 w-5 text-gray-500" />
+              </button>
+            </div>
+
+            {/* Warning Message */}
+            <div className="mb-6 p-4 bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-900/20 dark:to-orange-900/20 border border-amber-200 dark:border-amber-800 rounded-xl">
+              <div className="flex items-start">
+                <ExclamationTriangleIcon className="h-5 w-5 text-amber-600 dark:text-amber-400 mt-0.5 flex-shrink-0" />
+                <div className="ml-3">
+                  <h4 className="text-sm font-semibold text-amber-800 dark:text-amber-200">
+                    คำเตือน: การดำเนินการนี้ไม่สามารถย้อนกลับได้
+                  </h4>
+                  <p className="text-sm text-amber-700 dark:text-amber-300 mt-1">
+                    • API Key เดิมจะไม่สามารถใช้งานได้อีก<br/>
+                    • บริการที่ใช้ API Key เดิมจะหยุดทำงาน<br/>
+                    • คุณจะต้องอัปเดต API Key ใหม่ในระบบทั้งหมด
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* New API Key Preview */}
+            <div className="mb-6">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+                API Key ใหม่ที่จะถูกสร้าง:
+              </label>
+              <div className="relative">
+                <code className="block w-full text-sm bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-3 font-mono text-gray-700 dark:text-gray-300 break-all">
+                  {getTrimmedApiKey(resetApiKeyModal.newApiKey)}
+                </code>
+                <button
+                  onClick={(e) => {
+                    e.preventDefault();
+                    copyApiKey(resetApiKeyModal.newApiKey);
+                  }}
+                  className="absolute top-2 right-2 p-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors shadow-sm"
+                  title="คัดลอก API Key ใหม่"
+                >
+                  <ClipboardDocumentIcon className="h-4 w-4 text-gray-600 dark:text-gray-400" />
+                </button>
+              </div>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                💡 คัดลอก API Key ใหม่ไว้ก่อนยืนยัน เพื่อใช้อัปเดตในระบบอื่นๆ
+              </p>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex justify-end space-x-3">
+              <button
+                onClick={() => setResetApiKeyModal({ show: false, teamId: '', teamName: '', newApiKey: '' })}
+                className="px-6 py-3 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-xl hover:bg-gray-200 dark:hover:bg-gray-600 transition-all duration-300 font-medium"
+              >
+                ยกเลิก
+              </button>
+              <button
+                onClick={confirmResetApiKey}
+                className="px-6 py-3 bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-xl hover:from-orange-600 hover:to-red-600 transition-all duration-300 font-medium shadow-lg hover:shadow-xl transform hover:scale-105"
+              >
+                ยืนยัน รีเซ็ท API Key
+              </button>
             </div>
           </div>
         </div>

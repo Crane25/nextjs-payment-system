@@ -16,6 +16,7 @@ export interface TeamData {
   totalWebsites: number;
   totalBalance: number;
   dailyTopup: number;
+  apiKey?: string; // API Key ของทีม
 }
 
 // Cache system
@@ -54,6 +55,13 @@ export const useMultiTeam = (mode: 'all' | 'owned' = 'all') => {
       setLoading(true);
       setError(null);
       
+      console.log('useMultiTeam: Starting fetch', {
+        userId: user.uid,
+        userRole: userProfile.role,
+        userEmail: userProfile.email,
+        mode,
+        cacheKey
+      });
 
       
       let teamsQuery;
@@ -78,16 +86,32 @@ export const useMultiTeam = (mode: 'all' | 'owned' = 'all') => {
           const membersSnapshot = await getDocs(membersQuery);
           const userTeamIds = membersSnapshot.docs.map(doc => doc.data().teamId);
           
+          console.log('useMultiTeam: Admin found team memberships', {
+            userTeamIds,
+            memberDocs: membersSnapshot.docs.map(doc => ({ id: doc.id, data: doc.data() }))
+          });
+          
           if (userTeamIds.length > 0) {
             if (userTeamIds.length === 1) {
               const teamDoc = await getDoc(doc(db, 'teams', userTeamIds[0]));
               snapshot = { docs: teamDoc.exists() ? [teamDoc] : [] };
             } else {
-              teamsQuery = query(
-                collection(db, 'teams'),
-                where(documentId(), 'in', userTeamIds)
-              );
-        snapshot = await getDocs(teamsQuery);
+              // Handle multiple teams - chunk if more than 10 (Firestore 'in' limitation)
+              const chunks = [];
+              for (let i = 0; i < userTeamIds.length; i += 10) {
+                chunks.push(userTeamIds.slice(i, i + 10));
+              }
+              
+              const allDocs = [];
+              for (const chunk of chunks) {
+                teamsQuery = query(
+                  collection(db, 'teams'),
+                  where(documentId(), 'in', chunk)
+                );
+                const chunkSnapshot = await getDocs(teamsQuery);
+                allDocs.push(...chunkSnapshot.docs);
+              }
+              snapshot = { docs: allDocs };
             }
           } else {
             setTeams([]);
@@ -119,11 +143,22 @@ export const useMultiTeam = (mode: 'all' | 'owned' = 'all') => {
               const teamDoc = await getDoc(doc(db, 'teams', userTeamIds[0]));
               snapshot = { docs: teamDoc.exists() ? [teamDoc] : [] };
             } else {
-              teamsQuery = query(
-                collection(db, 'teams'),
-                where(documentId(), 'in', userTeamIds)
-              );
-              snapshot = await getDocs(teamsQuery);
+              // Handle multiple teams - chunk if more than 10 (Firestore 'in' limitation)
+              const chunks = [];
+              for (let i = 0; i < userTeamIds.length; i += 10) {
+                chunks.push(userTeamIds.slice(i, i + 10));
+              }
+              
+              const allDocs = [];
+              for (const chunk of chunks) {
+                teamsQuery = query(
+                  collection(db, 'teams'),
+                  where(documentId(), 'in', chunk)
+                );
+                const chunkSnapshot = await getDocs(teamsQuery);
+                allDocs.push(...chunkSnapshot.docs);
+              }
+              snapshot = { docs: allDocs };
             }
           } else {
             setTeams([]);
@@ -149,12 +184,22 @@ export const useMultiTeam = (mode: 'all' | 'owned' = 'all') => {
             const teamDoc = await getDoc(doc(db, 'teams', userTeamIds[0]));
             snapshot = { docs: teamDoc.exists() ? [teamDoc] : [] };
           } else {
-            // ถ้ามีหลายทีม ใช้ query with documentId
-            teamsQuery = query(
-              collection(db, 'teams'),
-              where(documentId(), 'in', userTeamIds)
-            );
-            snapshot = await getDocs(teamsQuery);
+            // ถ้ามีหลายทีม ใช้ query with documentId - handle Firestore 'in' limitation
+            const chunks = [];
+            for (let i = 0; i < userTeamIds.length; i += 10) {
+              chunks.push(userTeamIds.slice(i, i + 10));
+            }
+            
+            const allDocs = [];
+            for (const chunk of chunks) {
+              teamsQuery = query(
+                collection(db, 'teams'),
+                where(documentId(), 'in', chunk)
+              );
+              const chunkSnapshot = await getDocs(teamsQuery);
+              allDocs.push(...chunkSnapshot.docs);
+            }
+            snapshot = { docs: allDocs };
           }
         } else {
           // User: ไม่มีทีม
@@ -230,23 +275,59 @@ export const useMultiTeam = (mode: 'all' | 'owned' = 'all') => {
         const websiteData = websitesMap.get(teamId) || { count: 0, totalBalance: 0, dailyTopup: 0 };
         const ownerName = ownersMap.get(teamData.ownerId) || 'ไม่ระบุชื่อ';
 
+        // Handle different createdAt formats safely
+        let createdAtDate = new Date();
+        if (teamData.createdAt) {
+          if (typeof teamData.createdAt.toDate === 'function') {
+            // Firestore Timestamp
+            createdAtDate = teamData.createdAt.toDate();
+          } else if (teamData.createdAt instanceof Date) {
+            // Already a Date object
+            createdAtDate = teamData.createdAt;
+          } else if (typeof teamData.createdAt === 'string') {
+            // String date
+            createdAtDate = new Date(teamData.createdAt);
+          } else if (typeof teamData.createdAt === 'number') {
+            // Unix timestamp
+            createdAtDate = new Date(teamData.createdAt);
+          }
+        }
+
         return {
           id: teamId,
           name: teamData.name || 'ไม่ระบุชื่อ',
           description: teamData.description || '',
-          createdAt: teamData.createdAt?.toDate() || new Date(),
+          createdAt: createdAtDate,
           ownerId: teamData.ownerId || '',
           ownerName,
           memberCount,
           totalWebsites: websiteData.count,
           totalBalance: websiteData.totalBalance,
-          dailyTopup: websiteData.dailyTopup
+          dailyTopup: websiteData.dailyTopup,
+          apiKey: teamData.apiKey || '' // เพิ่ม API Key
         };
       });
 
+      // Sort teams by createdAt (oldest first)
+      teamsData.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
 
 
-      setTeams(teamsData);
+      // Debug logging
+      console.log('useMultiTeam: teams loaded', {
+        mode,
+        userRole: userProfile.role,
+        teamCount: teamsData.length,
+        userTeamIds: teamIds,
+        teams: teamsData.map(t => ({ id: t.id, name: t.name, ownerId: t.ownerId }))
+      });
+
+      // Ensure we have valid data before setting
+      if (Array.isArray(teamsData)) {
+        setTeams(teamsData);
+      } else {
+        console.error('useMultiTeam: Invalid teams data', teamsData);
+        setTeams([]);
+      }
       
       // Update cache
       cacheMap.set(cacheKey, {
@@ -256,14 +337,22 @@ export const useMultiTeam = (mode: 'all' | 'owned' = 'all') => {
       
       setLoading(false);
     } catch (err) {
+      console.error('useMultiTeam: Error occurred', {
+        error: err,
+        userId: user?.uid,
+        userRole: userProfile?.role,
+        mode
+      });
       setError('เกิดข้อผิดพลาดในการโหลดข้อมูลทีม');
       setLoading(false);
     }
   }, [user, userProfile, hasPermission, mode]);
 
   useEffect(() => {
+    // Clear cache when user or role changes to prevent stale data
+    cacheMap.clear();
     fetchTeamsOptimized();
-  }, [user?.uid, userProfile?.role, mode]);
+  }, [user?.uid, userProfile?.role, userProfile?.email, mode]);
 
   return {
     teams,
@@ -271,6 +360,7 @@ export const useMultiTeam = (mode: 'all' | 'owned' = 'all') => {
     error,
     canViewTeams: hasPermission('teams', 'read') || !!userProfile?.teamId,
     refreshTeams: () => {
+      console.log('useMultiTeam: Refreshing teams - clearing cache');
       cacheMap.clear(); // Clear all cache
       fetchTeamsOptimized(true);
     }

@@ -213,12 +213,30 @@ const AdminTeamsPage: React.FC = () => {
           };
         }
 
+        // Handle different createdAt formats safely
+        let createdAtDate = new Date();
+        if (teamData.createdAt) {
+          if (typeof teamData.createdAt.toDate === 'function') {
+            // Firestore Timestamp
+            createdAtDate = teamData.createdAt.toDate();
+          } else if (teamData.createdAt instanceof Date) {
+            // Already a Date object
+            createdAtDate = teamData.createdAt;
+          } else if (typeof teamData.createdAt === 'string') {
+            // String date
+            createdAtDate = new Date(teamData.createdAt);
+          } else if (typeof teamData.createdAt === 'number') {
+            // Unix timestamp
+            createdAtDate = new Date(teamData.createdAt);
+          }
+        }
+
         return {
           id: teamId,
           name: teamData.name || 'ไม่ระบุชื่อ',
           description: teamData.description || '',
           memberCount,
-          createdAt: teamData.createdAt?.toDate() || new Date(),
+          createdAt: createdAtDate,
           status: teamData.status || 'active',
           owner,
           totalBalance,
