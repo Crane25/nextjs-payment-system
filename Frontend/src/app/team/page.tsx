@@ -1187,7 +1187,7 @@ export default function TeamManagement() {
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  copyApiKey(team.apiKey);
+                                  if (team.apiKey) copyApiKey(team.apiKey);
                                 }}
                                 className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
                                 title="คัดลอก API Key"
