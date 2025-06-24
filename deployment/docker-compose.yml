@@ -57,7 +57,6 @@ services:
     
     # Volume Mounts
     volumes:
-      - ../Frontend/.env.local:/app/.env.local:ro
       - app-data:/app/data
       - app-logs:/app/logs
     
@@ -169,29 +168,17 @@ volumes:
   app-data:
     driver: local
     name: payment-app-data
-    driver_opts:
-      type: none
-      o: bind
-      device: /var/lib/docker/volumes/payment-data
   
   # Application Logs
   app-logs:
     driver: local
     name: payment-app-logs
-    driver_opts:
-      type: none
-      o: bind
-      device: /var/log/payment-app
   
     
   # Nginx Logs
   nginx-logs:
     driver: local
     name: payment-nginx-logs
-    driver_opts:
-      type: none
-      o: bind
-      device: /var/log/nginx
   
   # Nginx Cache
   nginx-cache:

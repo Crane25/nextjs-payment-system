@@ -98,7 +98,11 @@ RUN mkdir -p \
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
-COPY --from=builder --chown=nextjs:nodejs /app/package.json ./package.json
+
+# Ensure proper permissions and structure
+RUN chown -R nextjs:nodejs /app && \
+    chmod -R 755 /app && \
+    ls -la /app/
 
 # Create startup message script
 RUN echo 'echo "🚀 Starting Next.js Payment System v2.0..."' > /startup.sh && \
