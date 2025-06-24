@@ -60,7 +60,6 @@ services:
       - ../Frontend/.env.local:/app/.env.local:ro
       - app-data:/app/data
       - app-logs:/app/logs
-      - app-cache:/app/.next/cache
     
     # Network Configuration
     networks:
@@ -180,10 +179,6 @@ volumes:
       o: bind
       device: /var/log/payment-app
   
-  # Application Cache
-  app-cache:
-    driver: local
-    name: payment-app-cache
     
   # Nginx Logs
   nginx-logs:
