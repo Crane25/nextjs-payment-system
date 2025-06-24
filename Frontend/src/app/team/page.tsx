@@ -1361,7 +1361,13 @@ export default function TeamManagement() {
                               </td>
                               <td className="px-6 py-4 whitespace-nowrap">
                                 <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full border ${getRoleColor(member.role)}`}>
-                                  {ROLE_PERMISSIONS[member.role]?.label || member.role}
+                                  {(() => {
+                                    const selectedTeam = teams.find(t => t.id === selectedTeamId);
+                                    if (selectedTeam && member.userId === selectedTeam.ownerId) {
+                                      return 'เจ้าของ';
+                                    }
+                                    return ROLE_PERMISSIONS[member.role]?.label || member.role;
+                                  })()}
                                 </span>
                               </td>
                               <td className="px-6 py-4 whitespace-nowrap">
