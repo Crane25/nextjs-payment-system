@@ -48,8 +48,31 @@ export async function GET(request: NextRequest) {
       const teamName = teamDoc.data().name;
       console.log('Found team:', teamId, 'name:', teamName);
       
-      // Get websites for this team that are active
-      console.log('Querying websites for team:', teamId);
+      // Debug: Check all websites for this team first (without isActive filter)
+      console.log('=== DEBUGGING WEBSITES ===');
+      console.log('Team ID:', teamId);
+      
+      const allWebsitesQuery = query(
+        collection(db, 'websites'),
+        where('teamId', '==', teamId)
+      );
+      
+      const allWebsitesSnapshot = await getDocs(allWebsitesQuery);
+      console.log('All websites for team (without isActive filter):', allWebsitesSnapshot.size);
+      
+      allWebsitesSnapshot.docs.forEach((doc, index) => {
+        const data = doc.data();
+        console.log(`Website ${index + 1}:`, {
+          id: doc.id,
+          name: data.name,
+          teamId: data.teamId,
+          isActive: data.isActive,
+          url: data.url
+        });
+      });
+      
+      // Now get websites that are active
+      console.log('Querying ACTIVE websites for team:', teamId);
       const websitesQuery = query(
         collection(db, 'websites'),
         where('teamId', '==', teamId),
@@ -57,7 +80,7 @@ export async function GET(request: NextRequest) {
       );
       
       const websitesSnapshot = await getDocs(websitesQuery);
-      console.log('Websites query result:', websitesSnapshot.size, 'websites found');
+      console.log('Active websites query result:', websitesSnapshot.size, 'websites found');
       
       // Format website data
       const websites = websitesSnapshot.docs.map(doc => {
