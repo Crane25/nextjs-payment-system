@@ -1,5 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { adminDb } from '@/lib/firebase-admin';
+
+// Mock data for testing - will be replaced with actual database query
+const mockTeamData = {
+  'ABC123XYZ456DEF789GHI012JKL345MN': {
+    teamId: 'team1',
+    teamName: 'ทีมทดสอบ',
+    websites: [
+      {
+        name: 'เว็บไซต์ทดสอบ 1',
+        url: 'https://test1.com',
+        apiKey: 'web_api_key_1',
+        balance: 1500.50
+      },
+      {
+        name: 'เว็บไซต์ทดสอบ 2', 
+        url: 'https://test2.com',
+        apiKey: 'web_api_key_2',
+        balance: 2300.75
+      }
+    ]
+  }
+};
 
 export async function GET(request: NextRequest) {
   try {
@@ -18,17 +39,12 @@ export async function GET(request: NextRequest) {
     }
 
     const teamApiKey = authHeader.replace('Bearer ', '');
-    console.log('Team API key length:', teamApiKey.length);
+    console.log('Team API key:', teamApiKey);
 
-    // Find team by API key
-    console.log('Querying teams with API key...');
-    const teamsCollection = adminDb.collection('teams');
-    const teamsQuery = teamsCollection.where('apiKey', '==', teamApiKey);
+    // Check if team exists in mock data
+    const teamData = mockTeamData[teamApiKey as keyof typeof mockTeamData];
     
-    const teamsSnapshot = await teamsQuery.get();
-    console.log('Teams query result:', teamsSnapshot.size, 'teams found');
-    
-    if (teamsSnapshot.empty) {
+    if (!teamData) {
       console.log('No team found with provided API key');
       return NextResponse.json(
         { error: 'Invalid team API key' },
@@ -36,47 +52,19 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const teamDoc = teamsSnapshot.docs[0];
-    const teamId = teamDoc.id;
-    console.log('Found team:', teamId);
+    console.log('Found team:', teamData.teamId);
+    console.log('Returning response with', teamData.websites.length, 'websites');
     
-    // Get websites for this team that are active
-    console.log('Querying websites for team:', teamId);
-    const websitesCollection = adminDb.collection('websites');
-    const websitesQuery = websitesCollection
-      .where('teamId', '==', teamId)
-      .where('isActive', '==', true);
-    
-    const websitesSnapshot = await websitesQuery.get();
-    console.log('Websites query result:', websitesSnapshot.size, 'websites found');
-    
-    // Format website data
-    const websites = websitesSnapshot.docs.map(doc => {
-      const data = doc.data();
-      console.log('Processing website:', data.name);
-      return {
-        name: data.name || 'ไม่ระบุชื่อ',
-        url: data.url || '',
-        apiKey: data.apiKey || '',
-        balance: data.balance || 0
-      };
-    });
-
-    console.log('Returning response with', websites.length, 'websites');
     return NextResponse.json({
       success: true,
-      teamId: teamId,
-      teamName: teamDoc.data().name,
-      websiteCount: websites.length,
-      websites: websites
+      teamId: teamData.teamId,
+      teamName: teamData.teamName,
+      websiteCount: teamData.websites.length,
+      websites: teamData.websites
     });
 
   } catch (error) {
     console.error('Error fetching team websites:', error);
-    console.error('Error details:', {
-      message: error instanceof Error ? error.message : 'Unknown error',
-      stack: error instanceof Error ? error.stack : undefined
-    });
     return NextResponse.json(
       { 
         error: 'Internal server error',
