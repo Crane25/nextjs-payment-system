@@ -102,21 +102,19 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder --chown=nextjs:nodejs /app/package.json ./package.json
 
 # Create optimized start script
-RUN cat > /app/start.sh << 'EOF'
-#!/bin/sh
-set -e
-
-echo "🚀 Starting Next.js Payment System v2.0..."
-echo "📅 Started at: $(date)"
-echo "🌍 Environment: $NODE_ENV"
-echo "🔧 Node Version: $(node --version)"
-
-# Health check endpoint
-echo "🏥 Health check: http://localhost:$PORT/api/health"
-
-# Start application
-exec node server.js
-EOF
+RUN echo '#!/bin/sh\n\
+set -e\n\
+\n\
+echo "🚀 Starting Next.js Payment System v2.0..."\n\
+echo "📅 Started at: $(date)"\n\
+echo "🌍 Environment: $NODE_ENV"\n\
+echo "🔧 Node Version: $(node --version)"\n\
+\n\
+# Health check endpoint\n\
+echo "🏥 Health check: http://localhost:$PORT/api/health"\n\
+\n\
+# Start application\n\
+exec node server.js' > /app/start.sh
 
 RUN chmod +x /app/start.sh && \
     chown nextjs:nodejs /app/start.sh
