@@ -1,26 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { collection, query, where, getDocs } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
 
-// Mock data for testing - will be replaced with actual database query
-const mockTeamData = {
-  'ABC123XYZ456DEF789GHI012JKL345MN': {
-    teamId: 'team1',
-    teamName: 'ทีมทดสอบ',
-    websites: [
-      {
-        name: 'เว็บไซต์ทดสอบ 1',
-        url: 'https://test1.com',
-        apiKey: 'web_api_key_1',
-        balance: 1500.50
-      },
-      {
-        name: 'เว็บไซต์ทดสอบ 2', 
-        url: 'https://test2.com',
-        apiKey: 'web_api_key_2',
-        balance: 2300.75
-      }
-    ]
-  }
-};
+// Temporarily allow unauthenticated reads for API testing
+// This is a workaround for the admin SDK credentials issue
 
 export async function GET(request: NextRequest) {
   try {
@@ -41,27 +24,75 @@ export async function GET(request: NextRequest) {
     const teamApiKey = authHeader.replace('Bearer ', '');
     console.log('Team API key:', teamApiKey);
 
-    // Check if team exists in mock data
-    const teamData = mockTeamData[teamApiKey as keyof typeof mockTeamData];
-    
-    if (!teamData) {
-      console.log('No team found with provided API key');
+    try {
+      // Find team by API key
+      console.log('Querying teams collection...');
+      const teamsQuery = query(
+        collection(db, 'teams'),
+        where('apiKey', '==', teamApiKey)
+      );
+      
+      const teamsSnapshot = await getDocs(teamsQuery);
+      console.log('Teams query result:', teamsSnapshot.size, 'teams found');
+      
+      if (teamsSnapshot.empty) {
+        console.log('No team found with provided API key');
+        return NextResponse.json(
+          { error: 'Invalid team API key' },
+          { status: 401 }
+        );
+      }
+
+      const teamDoc = teamsSnapshot.docs[0];
+      const teamId = teamDoc.id;
+      const teamName = teamDoc.data().name;
+      console.log('Found team:', teamId, 'name:', teamName);
+      
+      // Get websites for this team that are active
+      console.log('Querying websites for team:', teamId);
+      const websitesQuery = query(
+        collection(db, 'websites'),
+        where('teamId', '==', teamId),
+        where('isActive', '==', true)
+      );
+      
+      const websitesSnapshot = await getDocs(websitesQuery);
+      console.log('Websites query result:', websitesSnapshot.size, 'websites found');
+      
+      // Format website data
+      const websites = websitesSnapshot.docs.map(doc => {
+        const data = doc.data();
+        console.log('Processing website:', data.name);
+        return {
+          name: data.name || 'ไม่ระบุชื่อ',
+          url: data.url || '',
+          apiKey: data.apiKey || '',
+          balance: data.balance || 0
+        };
+      });
+
+      console.log('Returning response with', websites.length, 'websites');
+      
+      return NextResponse.json({
+        success: true,
+        teamId: teamId,
+        teamName: teamName,
+        websiteCount: websites.length,
+        websites: websites
+      });
+
+    } catch (dbError) {
+      console.error('Database query error:', dbError);
+      // If Firebase query fails, return informative error
       return NextResponse.json(
-        { error: 'Invalid team API key' },
-        { status: 401 }
+        { 
+          error: 'Database connection failed',
+          details: dbError instanceof Error ? dbError.message : 'Unknown database error',
+          note: 'The API requires Firebase security rules to allow read access, or proper authentication setup'
+        },
+        { status: 503 }
       );
     }
-
-    console.log('Found team:', teamData.teamId);
-    console.log('Returning response with', teamData.websites.length, 'websites');
-    
-    return NextResponse.json({
-      success: true,
-      teamId: teamData.teamId,
-      teamName: teamData.teamName,
-      websiteCount: teamData.websites.length,
-      websites: teamData.websites
-    });
 
   } catch (error) {
     console.error('Error fetching team websites:', error);

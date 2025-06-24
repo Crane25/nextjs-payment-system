@@ -19,17 +19,20 @@ Authorization: Bearer <TEAM_API_KEY>
 ## Request Example
 
 ```bash
-# ใช้ API Key ทดสอบ
-curl -H "Authorization: Bearer ABC123XYZ456DEF789GHI012JKL345MN" \
+# ใช้ Team API Key จริงจากระบบ
+curl -H "Authorization: Bearer YOUR_ACTUAL_TEAM_API_KEY" \
      https://scjsnext.com/api/team/websites
 ```
 
-**API Key ทดสอบ**: `ABC123XYZ456DEF789GHI012JKL345MN`
+**วิธีหา Team API Key:**
+1. ไปที่ https://scjsnext.com/team
+2. ดูในการ์ดทีมของคุณ 
+3. คัดลอก API Key ที่แสดงในส่วน "API Key:"
 
 ```javascript
 fetch('https://scjsnext.com/api/team/websites', {
   headers: {
-    'Authorization': 'Bearer ABC123XYZ456DEF789GHI012JKL345MN'
+    'Authorization': 'Bearer YOUR_ACTUAL_TEAM_API_KEY'
   }
 })
 .then(response => response.json())
@@ -102,8 +105,8 @@ fetch('https://scjsnext.com/api/team/websites', {
 
 ## Notes
 
-- **ข้อมูลทดสอบ**: ปัจจุบันใช้ mock data สำหรับการทดสอบ
+- ใช้ **Team API Key จริง** จากระบบ (ไม่ใช่ API Key ของเว็บไซต์)
 - เฉพาะเว็บไซต์ที่มีสถานะ `isActive: true` เท่านั้นที่จะถูกส่งกลับ
 - API Key ของทีมต้องถูกต้องและเป็นของทีมที่มีอยู่จริง
-- ไม่ต้องการการยืนยันตัวตนผ่าน Firebase Auth สำหรับ API นี้
-- **API Key ทดสอบ**: `ABC123XYZ456DEF789GHI012JKL345MN`
+- หา Team API Key ได้จากหน้า https://scjsnext.com/team
+- หากเกิดข้อผิดพลาด "permission-denied" อาจต้องปรับ Firebase Security Rules
