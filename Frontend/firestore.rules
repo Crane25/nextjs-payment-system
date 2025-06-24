@@ -2,6 +2,10 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     
+    // NOTE: API Endpoints Access
+    // Some collections allow read access without authentication
+    // for API endpoints like /api/team/websites
+    
     // Users collection
     match /users/{userId} {
       // อ่าน-เขียนข้อมูลตัวเองได้
@@ -27,6 +31,9 @@ service cloud.firestore {
     match /teams/{teamId} {
       // ทุกคนที่ล็อกอินแล้วอ่าน-เขียนได้
       allow read, write: if request.auth != null;
+      
+      // อนุญาตให้อ่านข้อมูลสำหรับ API endpoints (ไม่ต้องล็อกอิน)
+      allow read: if true;
     }
     
     // Team Members collection
@@ -48,6 +55,9 @@ service cloud.firestore {
     match /websites/{websiteId} {
       // ทุกคนที่ล็อกอินแล้วอ่าน-เขียนได้
       allow read, write: if request.auth != null;
+      
+      // อนุญาตให้อ่านข้อมูลสำหรับ API endpoints (ไม่ต้องล็อกอิน)
+      allow read: if true;
     }
     
     // User websites subcollection
