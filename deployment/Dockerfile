@@ -21,9 +21,8 @@ WORKDIR /app
 COPY Frontend/package*.json ./
 COPY Frontend/yarn.lock* ./
 
-# Install dependencies with optimizations
+# Install ALL dependencies (including dev dependencies for build)
 RUN npm ci \
-    --only=production \
     --no-audit \
     --no-fund \
     --prefer-offline \
