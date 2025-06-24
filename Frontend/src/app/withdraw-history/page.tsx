@@ -39,6 +39,14 @@ export default function WithdrawHistory() {
   const { canViewTopup } = usePermission();
   const { teams, loading: teamsLoading } = useMultiTeam();
   
+  // Debug teams data
+  useEffect(() => {
+    console.log('withdraw-history: teams data', { 
+      teams: teams.map(t => ({ id: t.id, name: t.name })), 
+      teamsLoading 
+    });
+  }, [teams, teamsLoading]);
+  
   // Main data states
   const [withdrawHistory, setWithdrawHistory] = useState<WithdrawRecord[]>([]);
   const [loading, setLoading] = useState(true);

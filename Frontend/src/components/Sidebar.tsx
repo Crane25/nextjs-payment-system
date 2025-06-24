@@ -19,7 +19,8 @@ import {
   MoonIcon,
   SunIcon,
   UserGroupIcon,
-  ShieldCheckIcon
+  ShieldCheckIcon,
+  BoltIcon
 } from '@heroicons/react/24/outline';
 import {
   HomeIcon as HomeIconSolid,
@@ -68,6 +69,14 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, setIsOpen }) => {
       icon: CurrencyDollarIcon,
       iconSolid: CurrencyDollarIcon,
       current: pathname === '/withdraw-history'
+    }] : []),
+    // บอททำรายการสำหรับผู้ใช้ที่มีสิทธิ์ดู topup
+    ...(canViewTopup() ? [{
+      name: 'บอททำรายการ',
+      href: '/bot-transactions',
+      icon: BoltIcon,
+      iconSolid: BoltIcon,
+      current: pathname === '/bot-transactions'
     }] : []),
     // จัดการทีมสำหรับผู้ใช้ที่มีสิทธิ์
     ...(canViewTeams() ? [{
