@@ -1360,15 +1360,24 @@ export default function TeamManagement() {
                                 </div>
                               </td>
                               <td className="px-6 py-4 whitespace-nowrap">
-                                <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full border ${getRoleColor(member.role)}`}>
-                                  {(() => {
-                                    const selectedTeam = teams.find(t => t.id === selectedTeamId);
-                                    if (selectedTeam && member.userId === selectedTeam.ownerId) {
-                                      return 'เจ้าของ';
-                                    }
-                                    return ROLE_PERMISSIONS[member.role]?.label || member.role;
-                                  })()}
-                                </span>
+                                {(() => {
+                                  const selectedTeam = teams.find(t => t.id === selectedTeamId);
+                                  const isOwner = selectedTeam && member.userId === selectedTeam.ownerId;
+                                  
+                                  if (isOwner) {
+                                    return (
+                                      <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full border bg-gradient-to-r from-yellow-100 to-amber-100 text-amber-800 border-amber-300 dark:from-yellow-900/30 dark:to-amber-900/30 dark:text-amber-200 dark:border-amber-700">
+                                        เจ้าของ
+                                      </span>
+                                    );
+                                  }
+                                  
+                                  return (
+                                    <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full border ${getRoleColor(member.role)}`}>
+                                      {ROLE_PERMISSIONS[member.role]?.label || member.role}
+                                    </span>
+                                  );
+                                })()}
                               </td>
                               <td className="px-6 py-4 whitespace-nowrap">
                                 <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full border ${getStatusColor(member.status)}`}>
@@ -1381,8 +1390,12 @@ export default function TeamManagement() {
                               {canManageTeams() && (
                                 <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                                   <div className="flex space-x-2">
-                                    {/* ทั้ง Admin และ Manager ลบสมาชิกได้ */}
-                                    {(member.role !== 'manager' || member.invitedBy !== userProfile?.uid) && (
+                                    {/* ทั้ง Admin และ Manager ลบสมาชิกได้ แต่ไม่สามารถลบเจ้าของทีมได้ */}
+                                    {(() => {
+                                      const selectedTeam = teams.find(t => t.id === selectedTeamId);
+                                      const isOwner = selectedTeam && member.userId === selectedTeam.ownerId;
+                                      return !isOwner && (member.role !== 'manager' || member.invitedBy !== userProfile?.uid);
+                                    })() && (
                                       <button
                                         onClick={() => showRemoveMemberModal(member.id, member.email, member.currentDisplayName || getUserDisplayName(member))}
                                         className="text-red-600 dark:text-red-400 hover:text-red-900 dark:hover:text-red-300 p-1 rounded-md hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
