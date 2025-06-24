@@ -185,20 +185,10 @@ export default function TeamManagement() {
     }
   };
 
-  // Trim API key for display (remove prefix)
-  const getTrimmedApiKey = (apiKey: string) => {
-    // ตัดส่วนหน้า ggg_teamname_ ออก เหลือแค่ส่วนหลัง
-    const parts = apiKey.split('_');
-    if (parts.length >= 3) {
-      return parts.slice(2).join('_'); // เอาส่วนหลังจาก ggg_teamname_
-    }
-    return apiKey; // ถ้าไม่มี pattern ที่คาดหวัง ให้แสดงทั้งหมด
-  };
-
-  // Copy API key to clipboard (copy full key)
+  // Copy API key to clipboard
   const copyApiKey = async (apiKey: string) => {
     try {
-      await navigator.clipboard.writeText(apiKey); // คัดลอกคีย์เต็ม
+      await navigator.clipboard.writeText(apiKey);
       toast.success('คัดลอก API Key สำเร็จ');
     } catch (error) {
       toast.error('ไม่สามารถคัดลอกได้');
@@ -1159,8 +1149,8 @@ export default function TeamManagement() {
                           {team.apiKey ? (
                             <code className="ml-2 text-xs bg-gray-50 dark:bg-gray-800 px-2 py-1 rounded font-mono text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-600">
                               {showApiKey[team.id] 
-                                ? getTrimmedApiKey(team.apiKey)
-                                : '•'.repeat(Math.min(getTrimmedApiKey(team.apiKey).length, 24))
+                                ? team.apiKey
+                                : '•'.repeat(Math.min(team.apiKey.length, 32))
                               }
                             </code>
                           ) : (
@@ -2051,7 +2041,7 @@ export default function TeamManagement() {
               </label>
               <div className="relative">
                 <code className="block w-full text-sm bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-3 font-mono text-gray-700 dark:text-gray-300 break-all">
-                  {getTrimmedApiKey(resetApiKeyModal.newApiKey)}
+                  {resetApiKeyModal.newApiKey}
                 </code>
                 <button
                   onClick={(e) => {
