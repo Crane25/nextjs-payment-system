@@ -1211,78 +1211,20 @@ export default function Dashboard() {
       subtitle="ภาพรวมการเงินของคุณ"
     >
       <div className="space-y-6 lg:space-y-8">
-        {/* Welcome Card */}
-        <div className="relative bg-gradient-to-r from-blue-600 via-purple-600 to-pink-500 rounded-2xl p-6 lg:p-8 text-white overflow-hidden">
-          <div className="absolute inset-0 bg-black/10"></div>
-          <div className="absolute -top-40 -right-40 w-80 h-80 rounded-full bg-white/10 animate-pulse"></div>
-          <div className="relative z-10">
-            <div className="flex items-start justify-between">
-              <div>
-                <h2 className="text-2xl lg:text-3xl font-bold mb-3 text-white">สวัสดีตอนเช้า! ☀️</h2>
-                <p className="text-white/90 dark:text-white/95 text-base lg:text-lg">
-                  วันนี้คุณมีแผนการเงินอะไรบ้าง? มาดูสถานะการเงินของคุณกันเลย
-                </p>
-                {/* Real-time status in welcome card */}
-                <div className="flex items-center space-x-2 mt-3 text-white/80">
-                  <div className={`w-2 h-2 rounded-full ${isRealTimeActive ? 'bg-green-400 animate-pulse' : 'bg-white/40'}`}></div>
-                  <span className="text-sm">
-                    {isRealTimeActive ? 'กำลังซิงค์ข้อมูล...' : 'ระบบ Real-time พร้อมใช้งาน'}
-                  </span>
-                </div>
-              </div>
-              {/* Team Info */}
-              {teams.length > 0 && (
-                <div className="text-right">
-                  <p className="text-white/80 text-sm">คุณเป็นสมาชิกของ</p>
-                  <p className="text-white font-semibold text-lg">
-                    {teams.length} ทีม
-                  </p>
-                  <p className="text-white/70 text-xs mt-1">
-                    {selectedTeamFilter === 'all' 
-                      ? 'แสดงข้อมูลทุกทีม' 
-                      : `แสดงข้อมูล: ${teams.find(t => t.id === selectedTeamFilter)?.name || 'ทีมที่เลือก'}`
-                    }
-                  </p>
-                  {/* แสดงรายชื่อทีม */}
-                  <div className="text-white/60 text-xs mt-2 max-w-xs">
-                    {teams.slice(0, 3).map((team, index) => (
-                      <span key={team.id}>
-                        {team.name}
-                        {index < Math.min(teams.length, 3) - 1 && ', '}
-                      </span>
-                    ))}
-                    {teams.length > 3 && <span> และอีก {teams.length - 3} ทีม</span>}
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-
         {/* Stats Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 lg:gap-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           {statCards.map((stat, index) => (
-            <div key={index} className="group relative bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm rounded-2xl shadow-lg hover:shadow-2xl p-5 border border-white/60 dark:border-gray-700/60 hover:border-white/80 dark:hover:border-gray-600/80 transition-all duration-300 hover:scale-[1.02] overflow-hidden">
-              <div className={`absolute inset-0 bg-gradient-to-br ${stat.color} opacity-0 group-hover:opacity-5 transition-opacity duration-300`}></div>
-              
-              <div className="relative z-10">
-                <div className="flex items-center justify-between mb-4">
-                  <div className={`w-12 h-12 bg-gradient-to-br ${stat.color} rounded-xl flex items-center justify-center shadow-lg group-hover:shadow-xl transition-all duration-300 group-hover:scale-110`}>
-                    <stat.icon className="h-6 w-6 text-white" />
-                  </div>
-                  <div className={`w-2 h-2 bg-gradient-to-r ${stat.color} rounded-full animate-pulse opacity-60`}></div>
-                </div>
-                
-                <div className="space-y-2">
-                  <p className="text-sm font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wide">
+            <div key={index} className={`bg-gradient-to-r ${stat.color} rounded-2xl p-6 text-white`}>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-white/80 text-sm font-medium">
                     {stat.title}
                   </p>
-                  <p className="text-xl font-bold text-gray-900 dark:text-white">
+                  <p className="text-2xl font-bold">
                     {stat.value}
                   </p>
                 </div>
-                
-                <div className={`mt-4 h-1 bg-gradient-to-r ${stat.color} rounded-full transform scale-x-0 group-hover:scale-x-100 transition-transform duration-500 origin-left`}></div>
+                <stat.icon className="h-8 w-8 text-white/60" />
               </div>
             </div>
           ))}
