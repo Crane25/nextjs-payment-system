@@ -14,5 +14,46 @@ module.exports = {
       },
     },
   },
-  plugins: [],
+  plugins: [
+    function({ addUtilities }) {
+      addUtilities({
+        '.scrollbar-hide': {
+          /* IE and Edge */
+          '-ms-overflow-style': 'none',
+          /* Firefox */
+          'scrollbar-width': 'none',
+          /* Safari and Chrome */
+          '&::-webkit-scrollbar': {
+            display: 'none'
+          }
+        },
+        '.scrollbar-thin': {
+          /* Firefox */
+          'scrollbar-width': 'thin',
+          /* Safari and Chrome */
+          '&::-webkit-scrollbar': {
+            width: '8px',
+            height: '8px'
+          }
+        },
+        '.scrollbar-thumb-gray-300': {
+          '&::-webkit-scrollbar-thumb': {
+            'background-color': '#D1D5DB',
+            'border-radius': '4px'
+          }
+        },
+        '.scrollbar-thumb-gray-600': {
+          '&::-webkit-scrollbar-thumb': {
+            'background-color': '#4B5563',
+            'border-radius': '4px'
+          }
+        },
+        '.scrollbar-track-transparent': {
+          '&::-webkit-scrollbar-track': {
+            'background-color': 'transparent'
+          }
+        }
+      })
+    }
+  ],
 } 

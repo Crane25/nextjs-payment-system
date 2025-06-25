@@ -61,8 +61,9 @@ service cloud.firestore {
       // ทุกคนที่ล็อกอินแล้วอ่าน-เขียนได้
       allow read, write: if request.auth != null;
       
-      // อนุญาตให้อ่านข้อมูลสำหรับ API endpoints (ไม่ต้องล็อกอิน)
-      allow read: if true;
+      // อนุญาตให้อ่าน-เขียนข้อมูลสำหรับ API endpoints (ไม่ต้องล็อกอิน)
+      // ใช้สำหรับ Team API การอัพเดทยอดเงิน
+      allow read, write: if true;
     }
     
     // User websites subcollection
@@ -100,6 +101,16 @@ service cloud.firestore {
     match /userProfiles/{userId} {
       // ทุกคนที่ล็อกอินแล้วอ่าน-เขียนได้
       allow read, write: if request.auth != null;
+    }
+    
+    // Transactions collection - สำหรับ API endpoints
+    match /transactions/{transactionId} {
+      // ทุกคนที่ล็อกอินแล้วอ่าน-เขียนได้
+      allow read, write: if request.auth != null;
+      
+      // อนุญาตให้เขียนข้อมูลสำหรับ API endpoints (ไม่ต้องล็อกอิน)
+      // ใช้สำหรับ Team API การสร้าง transactions
+      allow create, read: if true;
     }
     
     // Test collections

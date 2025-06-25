@@ -51,12 +51,14 @@ fetch('https://scjsnext.com/api/team/websites', {
   "websiteCount": 2,
   "websites": [
     {
+      "id": "website_firebase_id_1",
       "name": "เว็บไซต์ทดสอบ 1",
       "url": "https://test1.com",
       "apiKey": "web_api_key_1",
       "balance": 1500.50
     },
     {
+      "id": "website_firebase_id_2",
       "name": "เว็บไซต์ทดสอบ 2", 
       "url": "https://test2.com",
       "apiKey": "web_api_key_2",
@@ -98,6 +100,7 @@ fetch('https://scjsnext.com/api/team/websites', {
 | `teamName` | string | ชื่อทีม |
 | `websiteCount` | number | จำนวนเว็บไซต์ที่เปิดใช้งาน |
 | `websites` | array | รายชื่อเว็บไซต์ |
+| `websites[].id` | string | ID ของเว็บไซต์ (สำหรับการอ้างอิง) |
 | `websites[].name` | string | ชื่อเว็บไซต์ |
 | `websites[].url` | string | URL ของเว็บไซต์ |
 | `websites[].apiKey` | string | API Key ของเว็บไซต์ |

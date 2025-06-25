@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import DashboardLayout from '../../components/DashboardLayout';
+// Removed VirtualScrollTable import - now using regular HTML table
 import { 
   CurrencyDollarIcon,
   CalendarDaysIcon,
@@ -143,13 +144,8 @@ export default function TopupHistory() {
   const [itemsPerPage, setItemsPerPage] = useState(50); // เริ่มต้น 50 รายการต่อหน้า
   const [totalItems, setTotalItems] = useState(0);
   const [totalPages, setTotalPages] = useState(0);
-  const [hasMore, setHasMore] = useState(true);
-  
   // Use refs for values that shouldn't trigger re-renders
-  const lastDocRef = useRef<any>(null);
   const isLoadingRef = useRef(false);
-  const paginationCache = useRef<Map<number, TopupRecord[]>>(new Map()); // Cache for pagination
-  const cursorCache = useRef<Map<number, any>>(new Map()); // Cache for cursors (last documents)
   
   // Summary statistics (for all data, not just displayed)
   const [allTimeStats, setAllTimeStats] = useState({
@@ -187,7 +183,7 @@ export default function TopupHistory() {
   });
 
 
-  // Optimized loading function with improved pagination for large datasets
+  // Optimized loading function with pagination for large datasets
   const loadTopupHistory = useCallback(async (forceRefresh = false, page = 1) => {
     if (!user || !userProfile || teamsLoading) {
       return;
@@ -198,85 +194,26 @@ export default function TopupHistory() {
       return;
     }
 
-    // Check cache first for non-refresh requests
-    if (!forceRefresh && paginationCache.current.has(page)) {
-      const cachedData = paginationCache.current.get(page);
-      if (cachedData) {
-        setTopupHistory(cachedData);
-        setCurrentPage(page);
-        setLoading(false);
-        return;
-      }
-    }
-
     try {
       isLoadingRef.current = true;
       performanceRef.current.loadStartTime = performance.now();
       
       if (forceRefresh) {
         setRefreshing(true);
+        setTopupHistory([]);
         setCurrentPage(1);
-        lastDocRef.current = null;
-        paginationCache.current.clear(); // Clear cache on refresh
-        cursorCache.current.clear(); // Clear cursor cache on refresh
         // Clear stats cache on force refresh
         statsCache.current = { data: null, expiry: 0, userTeamIds: [] };
       } else {
         setLoading(true);
       }
 
-      // Create optimized cursor-based pagination query
+      // Load ALL data for client-side pagination (like withdraw-history)
       let topupQuery = query(
         collection(db, 'topupHistory'),
         orderBy('timestamp', 'desc'),
-        limit(itemsPerPage)
+        limit(5000) // Load more data for pagination
       );
-
-      // For pagination beyond first page, use cached cursor
-      if (page > 1) {
-        const prevPageCursor = cursorCache.current.get(page - 1);
-        if (prevPageCursor) {
-          topupQuery = query(
-            collection(db, 'topupHistory'),
-            orderBy('timestamp', 'desc'),
-            startAfter(prevPageCursor),
-            limit(itemsPerPage)
-          );
-        } else {
-          // If cursor not found, we need to build the path sequentially
-          // This is a fallback for direct page navigation
-          
-          let currentCursor = null;
-          
-          for (let i = 1; i < page; i++) {
-            if (cursorCache.current.has(i)) {
-              currentCursor = cursorCache.current.get(i);
-            } else {
-                             // Build missing cursor by querying the previous page
-               const buildQuery: Query<DocumentData> = currentCursor 
-                 ? query(collection(db, 'topupHistory'), orderBy('timestamp', 'desc'), startAfter(currentCursor), limit(itemsPerPage))
-                 : query(collection(db, 'topupHistory'), orderBy('timestamp', 'desc'), limit(itemsPerPage));
-               
-               const buildSnapshot: QuerySnapshot<DocumentData> = await getDocs(buildQuery);
-              if (buildSnapshot.docs.length > 0) {
-                currentCursor = buildSnapshot.docs[buildSnapshot.docs.length - 1];
-                cursorCache.current.set(i, currentCursor);
-              } else {
-                break;
-              }
-            }
-          }
-          
-          if (currentCursor) {
-            topupQuery = query(
-              collection(db, 'topupHistory'),
-              orderBy('timestamp', 'desc'),
-              startAfter(currentCursor),
-              limit(itemsPerPage)
-            );
-          }
-        }
-      }
 
       // Check if we can use cached statistics
       const currentUserTeamIds = teams.map(team => team.id);
@@ -286,7 +223,7 @@ export default function TopupHistory() {
       let shouldLoadStats = false;
       let cachedStats = null;
       
-      if (page === 1 || forceRefresh) {
+      if (forceRefresh || page === 1) {
         const cacheValid = statsCache.current.expiry > now && 
                           JSON.stringify(statsCache.current.userTeamIds) === JSON.stringify(currentUserTeamIds);
         
@@ -380,34 +317,16 @@ export default function TopupHistory() {
       // Data is already sorted by Firestore query (orderBy timestamp desc)
       // No need to sort again
       
-      // Update pagination info
-      setHasMore(topupSnapshot.docs.length === itemsPerPage);
-      if (topupSnapshot.docs.length > 0) {
-        lastDocRef.current = topupSnapshot.docs[topupSnapshot.docs.length - 1];
-      }
-      
-      // Always replace data for specific page (not append)
+      // Always replace data for pagination (no infinite scroll)
       setTopupHistory(filteredRecords);
-      setCurrentPage(page);
       
-      // Cache the current page data and cursor
-      paginationCache.current.set(page, filteredRecords);
-      
-      // Store cursor for next page navigation
-      if (topupSnapshot.docs.length > 0) {
-        const lastDoc = topupSnapshot.docs[topupSnapshot.docs.length - 1];
-        cursorCache.current.set(page, lastDoc);
-      }
-      
-      // Update total items count and pagination info
-      if (page === 1 || forceRefresh) {
-        // On first page, get total count from all stats data for pagination
+      // Update total items count
+      if (forceRefresh || page === 1) {
         if (allStatsSnapshot) {
           const userTeamIds = teams.map(team => team.id);
           let totalCount = 0;
           
           if (userProfile.role === 'admin') {
-            // Admin: นับเฉพาะข้อมูลทีมที่ตัวเองเป็นสมาชิก (เหมือน Manager)
             totalCount = allStatsSnapshot.docs.filter((doc: any) => {
               const data = doc.data();
               return data.teamId && userTeamIds.includes(data.teamId);
@@ -420,14 +339,13 @@ export default function TopupHistory() {
           }
           
           setTotalItems(totalCount);
-          setTotalPages(Math.ceil(totalCount / itemsPerPage));
         }
       }
       
       setLastUpdated(new Date());
       
       // Use cached statistics or calculate new ones
-      if (page === 1 || forceRefresh) {
+      if (forceRefresh || page === 1) {
         if (cachedStats) {
           // Use cached statistics
           setAllTimeStats(cachedStats);
@@ -538,73 +456,15 @@ export default function TopupHistory() {
     }
   }, [user, userProfile, teams, teamsLoading, itemsPerPage]);
 
-  // Navigate to specific page
-  const goToPage = (page: number) => {
-    if (page >= 1 && page <= totalPages && page !== currentPage) {
-      loadTopupHistory(false, page);
-    }
-  };
-
   // Force refresh function
   const handleRefresh = () => {
-    loadTopupHistory(true);
-  };
-
-  // Generate page numbers for pagination
-  const getPageNumbers = (): (number | string)[] => {
-    const pages: (number | string)[] = [];
-    const totalPagesToShow = 7; // Show max 7 page numbers
-    const halfRange = Math.floor(totalPagesToShow / 2);
-
-    if (totalPages <= totalPagesToShow) {
-      // Show all pages if total pages is small
-      for (let i = 1; i <= totalPages; i++) {
-        pages.push(i);
-      }
-    } else {
-      // Show first page
-      pages.push(1);
-
-      // Calculate range around current page
-      let startPage = Math.max(2, currentPage - halfRange);
-      let endPage = Math.min(totalPages - 1, currentPage + halfRange);
-
-      // Adjust range if needed
-      if (currentPage - halfRange <= 2) {
-        endPage = Math.min(totalPages - 1, totalPagesToShow - 2);
-      }
-      if (currentPage + halfRange >= totalPages - 1) {
-        startPage = Math.max(2, totalPages - totalPagesToShow + 2);
-      }
-
-      // Add ellipsis if needed
-      if (startPage > 2) {
-        pages.push('...');
-      }
-
-      // Add middle pages
-      for (let i = startPage; i <= endPage; i++) {
-        pages.push(i);
-      }
-
-      // Add ellipsis if needed
-      if (endPage < totalPages - 1) {
-        pages.push('...');
-      }
-
-      // Show last page
-      if (totalPages > 1) {
-        pages.push(totalPages);
-      }
-    }
-
-    return pages;
+    loadTopupHistory(true, 1);
   };
 
   // Load data when component mounts and dependencies are ready
   useEffect(() => {
     if (user && userProfile && !teamsLoading) {
-      loadTopupHistory();
+      loadTopupHistory(true, 1);
     }
   }, [user?.uid, userProfile?.role, teamsLoading, loadTopupHistory]);
 
@@ -658,7 +518,7 @@ export default function TopupHistory() {
             statsCache.current = { data: null, expiry: 0, userTeamIds: [] };
             
             // Reload data to get the new records
-            loadTopupHistory(true);
+            loadTopupHistory(true, 1);
             
             // Show notification
             toast.success(
@@ -685,6 +545,11 @@ export default function TopupHistory() {
       }
     };
   }, [user, userProfile, teamsLoading, teams, loadTopupHistory]);
+
+  // Reset page when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, filterStatus, filterPeriod, selectedTeamFilter, startDate, endDate, itemsPerPage]);
 
   // Get filtered history based on search, status, period, and team
   const getFilteredHistory = () => {
@@ -954,8 +819,6 @@ export default function TopupHistory() {
                   onChange={(e) => {
                     setItemsPerPage(Number(e.target.value));
                     setCurrentPage(1);
-                    lastDocRef.current = null;
-                    loadTopupHistory(true, 1);
                   }}
                   className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                 >
@@ -1146,15 +1009,29 @@ export default function TopupHistory() {
             </div>
           </div>
 
+          {/* Table Header */}
+          <div className="border-b border-gray-200 dark:border-gray-700 pb-3 mb-3">
+            <div className={`grid gap-4 px-4 py-3 text-sm font-semibold text-gray-900 dark:text-white ${teams.length > 1 ? 'grid-cols-9' : 'grid-cols-8'}`}>
+              <div>วันที่/เวลา</div>
+              <div>เว็บไซต์</div>
+              {teams.length > 1 && <div>ทีม</div>}
+              <div>ผู้เติมเงิน</div>
+              <div className="text-center">จำนวนเติม</div>
+              <div className="text-center">ยอดก่อนเติม</div>
+              <div className="text-center">ยอดหลังเติม</div>
+              <div>หมายเหตุ</div>
+              <div className="text-center">สถานะ</div>
+            </div>
+          </div>
+
+                    {/* Table */}
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
                 <tr className="border-b border-gray-200 dark:border-gray-700">
                   <th className="text-left py-3 px-4 font-semibold text-gray-900 dark:text-white">วันที่/เวลา</th>
                   <th className="text-left py-3 px-4 font-semibold text-gray-900 dark:text-white">เว็บไซต์</th>
-                  {teams.length > 1 && (
-                    <th className="text-left py-3 px-4 font-semibold text-gray-900 dark:text-white">ทีม</th>
-                  )}
+                  {teams.length > 1 && <th className="text-left py-3 px-4 font-semibold text-gray-900 dark:text-white">ทีม</th>}
                   <th className="text-left py-3 px-4 font-semibold text-gray-900 dark:text-white">ผู้เติมเงิน</th>
                   <th className="text-center py-3 px-4 font-semibold text-gray-900 dark:text-white">จำนวนเติม</th>
                   <th className="text-center py-3 px-4 font-semibold text-gray-900 dark:text-white">ยอดก่อนเติม</th>
@@ -1164,9 +1041,9 @@ export default function TopupHistory() {
                 </tr>
               </thead>
               <tbody>
-                {(loading || teamsLoading) ? (
+                {(loading || teamsLoading) && topupHistory.length === 0 ? (
                   <tr>
-                    <td colSpan={teams.length > 1 ? 9 : 8} className="py-8 text-center">
+                    <td colSpan={teams.length > 1 ? 9 : 8} className="py-16 text-center">
                       <div className="flex items-center justify-center">
                         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
                         <span className="ml-2 text-gray-500 dark:text-gray-400">
@@ -1177,7 +1054,7 @@ export default function TopupHistory() {
                   </tr>
                 ) : teams.length === 0 && !teamsLoading ? (
                   <tr>
-                    <td colSpan={teams.length > 1 ? 9 : 8} className="py-8 text-center">
+                    <td colSpan={teams.length > 1 ? 9 : 8} className="py-16 text-center">
                       <div className="text-gray-500 dark:text-gray-400">
                         <UserGroupIcon className="h-12 w-12 mx-auto mb-2 opacity-50" />
                         <p>ไม่พบทีมที่เข้าร่วม</p>
@@ -1187,7 +1064,7 @@ export default function TopupHistory() {
                   </tr>
                 ) : getFilteredHistory().length === 0 ? (
                   <tr>
-                    <td colSpan={teams.length > 1 ? 9 : 8} className="py-8 text-center">
+                    <td colSpan={teams.length > 1 ? 9 : 8} className="py-16 text-center">
                       <div className="text-gray-500 dark:text-gray-400">
                         <CurrencyDollarIcon className="h-12 w-12 mx-auto mb-2 opacity-50" />
                         <p>ไม่พบประวัติการเติมเงิน</p>
@@ -1196,10 +1073,10 @@ export default function TopupHistory() {
                     </td>
                   </tr>
                 ) : (
-                  getFilteredHistory().map((record) => (
+                  getFilteredHistory().slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage).map((record) => (
                     <tr key={record.id} className="border-b border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors duration-200">
                       <td className="py-4 px-4">
-                        <div className="text-sm text-gray-900 dark:text-white font-medium">
+                        <div className="text-sm font-medium text-gray-900 dark:text-white">
                           {formatDate(record.timestamp)}
                         </div>
                       </td>
@@ -1216,7 +1093,7 @@ export default function TopupHistory() {
                       )}
                       <td className="py-4 px-4">
                         <div className="flex items-center space-x-2">
-                          <div className="w-8 h-8 bg-gradient-to-r from-blue-500 to-purple-600 rounded-full flex items-center justify-center">
+                          <div className="w-8 h-8 bg-gradient-to-r from-blue-500 to-cyan-600 rounded-full flex items-center justify-center">
                             <span className="text-white text-xs font-bold">
                               {(record.topupBy || 'ผู้ใช้').charAt(0).toUpperCase()}
                             </span>
@@ -1237,22 +1114,20 @@ export default function TopupHistory() {
                         </div>
                       </td>
                       <td className="py-4 px-4 text-center">
-                        {record.balanceAfter !== undefined ? (
-                          <div className="font-medium text-gray-700 dark:text-gray-300">
-                            ฿{(record.balanceAfter - record.amount).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                          </div>
-                        ) : (
-                          <span className="text-gray-400 dark:text-gray-500 text-sm italic">-</span>
-                        )}
+                        <div className="text-sm text-gray-600 dark:text-gray-400">
+                          {record.balanceAfter !== undefined ? 
+                            `฿${(record.balanceAfter - record.amount).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : 
+                            '-'
+                          }
+                        </div>
                       </td>
                       <td className="py-4 px-4 text-center">
-                        {record.balanceAfter !== undefined ? (
-                          <div className="font-bold text-blue-600 dark:text-blue-400">
-                            ฿{record.balanceAfter.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                          </div>
-                        ) : (
-                          <span className="text-gray-400 dark:text-gray-500 text-sm italic">-</span>
-                        )}
+                        <div className="text-sm font-medium text-blue-600 dark:text-blue-400">
+                          {record.balanceAfter !== undefined ? 
+                            `฿${record.balanceAfter.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : 
+                            '-'
+                          }
+                        </div>
                       </td>
                       <td className="py-4 px-4">
                         {record.note ? (
@@ -1297,89 +1172,59 @@ export default function TopupHistory() {
             </table>
           </div>
 
-          {/* Advanced Pagination */}
-          {totalPages > 1 && (
-            <div className="mt-6 flex flex-col sm:flex-row items-center justify-between gap-4">
-              {/* Pagination Info */}
-              <div className="text-sm text-gray-600 dark:text-gray-400">
-                แสดงรายการ {((currentPage - 1) * itemsPerPage) + 1} - {Math.min(currentPage * itemsPerPage, totalItems)} จาก {totalItems.toLocaleString()} รายการ
+          {/* Pagination */}
+          {Math.ceil(getFilteredHistory().length / itemsPerPage) > 1 && (
+            <div className="mt-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+              <div className="text-sm text-gray-700 dark:text-gray-300">
+                แสดง {((currentPage - 1) * itemsPerPage) + 1} ถึง {Math.min(currentPage * itemsPerPage, getFilteredHistory().length)} จาก {getFilteredHistory().length} รายการ
               </div>
-
-              {/* Pagination Controls */}
-              <div className="flex items-center gap-2">
-                {/* Previous Button */}
+              
+              <div className="flex items-center space-x-2">
                 <button
-                  onClick={() => goToPage(currentPage - 1)}
-                  disabled={currentPage === 1 || loading || refreshing}
-                  className="flex items-center gap-1 px-3 py-2 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+                  disabled={currentPage === 1}
+                  className="inline-flex items-center px-3 py-2 text-sm font-medium text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  ← ก่อนหน้า
+                  ก่อนหน้า
                 </button>
-
-                {/* Page Numbers */}
-                <div className="flex items-center gap-1">
-                  {getPageNumbers().map((page, index) => (
-                    <React.Fragment key={index}>
-                      {page === '...' ? (
-                        <span className="px-3 py-2 text-gray-500">...</span>
-                      ) : (
-                        <button
-                          onClick={() => goToPage(page as number)}
-                          disabled={loading || refreshing}
-                          className={`px-3 py-2 text-sm rounded-lg transition-colors disabled:opacity-50 ${
-                            currentPage === page
-                              ? 'bg-blue-500 text-white font-medium'
-                              : 'bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300'
-                          }`}
-                        >
-                          {page}
-                        </button>
-                      )}
-                    </React.Fragment>
-                  ))}
+                
+                <div className="flex items-center space-x-1">
+                  {Array.from({ length: Math.min(Math.ceil(getFilteredHistory().length / itemsPerPage), 7) }, (_, i) => {
+                    const totalPages = Math.ceil(getFilteredHistory().length / itemsPerPage);
+                    let page;
+                    if (totalPages <= 7) {
+                      page = i + 1;
+                    } else if (currentPage <= 4) {
+                      page = i + 1;
+                    } else if (currentPage >= totalPages - 3) {
+                      page = totalPages - 6 + i;
+                    } else {
+                      page = currentPage - 3 + i;
+                    }
+                    
+                    return (
+                      <button
+                        key={page}
+                        onClick={() => setCurrentPage(page)}
+                        className={`px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
+                          currentPage === page
+                            ? 'bg-blue-600 text-white border border-blue-600'
+                            : 'text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700'
+                        }`}
+                      >
+                        {page}
+                      </button>
+                    );
+                  })}
                 </div>
-
-                {/* Next Button */}
+                
                 <button
-                  onClick={() => goToPage(currentPage + 1)}
-                  disabled={currentPage === totalPages || loading || refreshing}
-                  className="flex items-center gap-1 px-3 py-2 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  onClick={() => setCurrentPage(Math.min(Math.ceil(getFilteredHistory().length / itemsPerPage), currentPage + 1))}
+                  disabled={currentPage === Math.ceil(getFilteredHistory().length / itemsPerPage)}
+                  className="inline-flex items-center px-3 py-2 text-sm font-medium text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  ถัดไป →
+                  ถัดไป
                 </button>
-              </div>
-
-              {/* Items per page selector */}
-              <div className="flex items-center gap-2 text-sm">
-                <label className="text-gray-600 dark:text-gray-400">แสดง:</label>
-                <select
-                  value={itemsPerPage}
-                  onChange={(e) => {
-                    const newItemsPerPage = parseInt(e.target.value);
-                    setItemsPerPage(newItemsPerPage);
-                    setCurrentPage(1);
-                    paginationCache.current.clear();
-                    cursorCache.current.clear();
-                    loadTopupHistory(true, 1);
-                  }}
-                  className="px-2 py-1 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                >
-                  <option value={25}>25</option>
-                  <option value={50}>50</option>
-                  <option value={100}>100</option>
-                  <option value={200}>200</option>
-                </select>
-                <span className="text-gray-600 dark:text-gray-400">รายการ/หน้า</span>
-              </div>
-            </div>
-          )}
-
-          {/* Loading indicator for pagination */}
-          {(loading || refreshing) && (
-            <div className="mt-4 text-center">
-              <div className="inline-flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
-                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500"></div>
-                {refreshing ? 'กำลังรีเฟรชข้อมูล...' : 'กำลังโหลดหน้าถัดไป...'}
               </div>
             </div>
           )}

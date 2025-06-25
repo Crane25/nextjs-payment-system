@@ -94,6 +94,7 @@ export async function GET(request: NextRequest) {
           const data = doc.data();
           console.log('Processing website:', data.name, 'status:', data.status);
           return {
+            id: doc.id, // เพิ่ม website ID สำหรับการอ้างอิง
             name: data.name || 'ไม่ระบุชื่อ',
             url: data.url || '',
             apiKey: data.apiKey || '',
