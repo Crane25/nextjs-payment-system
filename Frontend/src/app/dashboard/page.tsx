@@ -1184,12 +1184,13 @@ export default function Dashboard() {
       icon: ArrowTrendingUpIcon,
       color: 'from-blue-500 to-cyan-600'
     },
-    {
-      title: 'ยอดถอนรวมวันนี้',
-      value: `฿${getFilteredWebsites().reduce((sum, site: any) => sum + (todayWithdrawByWebsite[site.id] || 0), 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-      icon: ArrowTrendingDownIcon,
-      color: 'from-orange-500 to-red-600'
-    },
+    // ซ่อนการ์ดยอดถอนรวมวันนี้ชั่วคราว
+    // {
+    //   title: 'ยอดถอนรวมวันนี้',
+    //   value: `฿${getFilteredWebsites().reduce((sum, site: any) => sum + (todayWithdrawByWebsite[site.id] || 0), 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+    //   icon: ArrowTrendingDownIcon,
+    //   color: 'from-orange-500 to-red-600'
+    // },
     {
       title: 'เว็บทั้งหมด',
       value: `${getFilteredWebsites().length} เว็บ`,
@@ -1558,7 +1559,8 @@ export default function Dashboard() {
                                   <span>เติมเงิน</span>
                                 </button>
                               )}
-                              {canDeleteWebsites() && (!website.teamId || hasTeamPermission(website.teamId, 'websites', 'delete')) && (
+                              {/* ซ่อนปุ่มถอนเงินชั่วคราว */}
+                              {false && canDeleteWebsites() && (!website.teamId || hasTeamPermission(website.teamId, 'websites', 'delete')) && (
                                 <button 
                                   onClick={() => showWithdrawModal(website.id, website.name)}
                                   className="flex items-center space-x-1 px-2 py-1 bg-orange-100 text-orange-700 hover:bg-orange-200 dark:bg-orange-900/30 dark:text-orange-400 rounded-lg text-xs font-medium transition-colors"
