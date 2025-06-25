@@ -1001,10 +1001,56 @@ export default function TeamManagement() {
         await deleteDoc(doc(db, 'invitations', invitationDoc.id));
       }
 
+      // Delete all websites in this team
+      const websitesQuery = query(
+        collection(db, 'websites'),
+        where('teamId', '==', deleteTeamModal.teamId)
+      );
+      const websitesSnapshot = await getDocs(websitesQuery);
+      
+      for (const websiteDoc of websitesSnapshot.docs) {
+        await deleteDoc(doc(db, 'websites', websiteDoc.id));
+      }
+
+      // Delete all topup history related to this team
+      const topupHistoryQuery = query(
+        collection(db, 'topupHistory'),
+        where('teamId', '==', deleteTeamModal.teamId)
+      );
+      const topupHistorySnapshot = await getDocs(topupHistoryQuery);
+      
+      for (const topupDoc of topupHistorySnapshot.docs) {
+        await deleteDoc(doc(db, 'topupHistory', topupDoc.id));
+      }
+
+      // Delete all withdraw history related to this team
+      const withdrawHistoryQuery = query(
+        collection(db, 'withdrawHistory'),
+        where('teamId', '==', deleteTeamModal.teamId)
+      );
+      const withdrawHistorySnapshot = await getDocs(withdrawHistoryQuery);
+      
+      for (const withdrawDoc of withdrawHistorySnapshot.docs) {
+        await deleteDoc(doc(db, 'withdrawHistory', withdrawDoc.id));
+      }
+
+      // Log team deletion
+      if (userProfile) {
+        await logTeamDeleted(
+          userProfile.uid,
+          userProfile.email || '',
+          userProfile.displayName || userProfile.email || 'Unknown',
+          deleteTeamModal.teamName,
+          membersSnapshot.docs.length,
+          websitesSnapshot.docs.length,
+          0 // totalBalance - we don't have this info here
+        );
+      }
+
       // Delete the team
       await deleteDoc(doc(db, 'teams', deleteTeamModal.teamId));
 
-      toast.success(`ลบทีม "${deleteTeamModal.teamName}" สำเร็จ`);
+      toast.success(`ลบทีม "${deleteTeamModal.teamName}" และข้อมูลที่เกี่ยวข้องทั้งหมดสำเร็จ`);
       hideDeleteTeamModal();
       
       // Refresh teams and clear selection if deleted team was selected
@@ -1013,6 +1059,7 @@ export default function TeamManagement() {
         setSelectedTeamId(null);
       }
     } catch (error) {
+      console.error('Error deleting team:', error);
       toast.error('เกิดข้อผิดพลาดในการลบทีม กรุณาลองใหม่อีกครั้ง');
     }
   };
