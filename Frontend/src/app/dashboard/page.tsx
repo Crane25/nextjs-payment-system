@@ -19,7 +19,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useUserProfile } from '../../contexts/UserContext';
 import { usePermission } from '../../hooks/usePermission';
 import { useMultiTeam } from '../../hooks/useMultiTeam';
-import { collection, getDocs, addDoc, deleteDoc, doc, updateDoc, onSnapshot, query, orderBy } from 'firebase/firestore';
+import { collection, getDocs, addDoc, deleteDoc, doc, updateDoc, onSnapshot, query, orderBy, where } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import toast from 'react-hot-toast';
 import { cacheManager, CACHE_KEYS } from '../../utils/cacheManager';
@@ -751,6 +751,42 @@ export default function Dashboard() {
       
       await deleteDoc(websiteRef);
       
+      // Delete related topup history records
+      try {
+        const topupHistoryRef = website.teamId 
+          ? collection(db, 'topupHistory')
+          : collection(db, 'users', user.uid, 'topupHistory');
+          
+        const topupQuery = query(topupHistoryRef, where('websiteId', '==', deleteConfirm.websiteId));
+        const topupSnapshot = await getDocs(topupQuery);
+        
+        const topupDeletePromises = topupSnapshot.docs.map(doc => deleteDoc(doc.ref));
+        await Promise.all(topupDeletePromises);
+        
+        console.log(`Deleted ${topupSnapshot.docs.length} topup history records for website ${deleteConfirm.websiteId}`);
+      } catch (error) {
+        console.error('Error deleting topup history:', error);
+        // Continue with deletion even if history cleanup fails
+      }
+      
+      // Delete related withdraw history records
+      try {
+        const withdrawHistoryRef = website.teamId 
+          ? collection(db, 'withdrawHistory')
+          : collection(db, 'users', user.uid, 'withdrawHistory');
+          
+        const withdrawQuery = query(withdrawHistoryRef, where('websiteId', '==', deleteConfirm.websiteId));
+        const withdrawSnapshot = await getDocs(withdrawQuery);
+        
+        const withdrawDeletePromises = withdrawSnapshot.docs.map(doc => deleteDoc(doc.ref));
+        await Promise.all(withdrawDeletePromises);
+        
+        console.log(`Deleted ${withdrawSnapshot.docs.length} withdraw history records for website ${deleteConfirm.websiteId}`);
+      } catch (error) {
+        console.error('Error deleting withdraw history:', error);
+        // Continue with deletion even if history cleanup fails
+      }
+      
       // Log website deletion
       if (userProfile) {
         const teamName = website.teamName || teams.find(t => t.id === website.teamId)?.name;
@@ -767,11 +803,11 @@ export default function Dashboard() {
       // Remove from local state
       setWebsites(websites.filter(website => website.id !== deleteConfirm.websiteId));
       
-      toast.success('ลบเว็บไซต์เรียบร้อย');
+      toast.success('ลบเว็บไซต์และประวัติที่เกี่ยวข้องเรียบร้อย');
       hideDeleteConfirm();
       
     } catch (error) {
-      // Error deleting website
+      console.error('Error deleting website:', error);
       toast.error('ไม่สามารถลบเว็บไซต์ได้');
     }
   };
