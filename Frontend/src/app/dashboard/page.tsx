@@ -112,6 +112,9 @@ export default function Dashboard() {
     note: ''
   });
 
+  // Add loading state for topup processing
+  const [isTopupProcessing, setIsTopupProcessing] = useState(false);
+
   const [showAddWebsite, setShowAddWebsite] = useState(false);
   const [newWebsite, setNewWebsite] = useState({
     name: '',
@@ -819,6 +822,7 @@ export default function Dashboard() {
   };
 
   const hideTopupConfirm = () => {
+    setIsTopupProcessing(false);
     setTopupConfirm({
       show: false,
       websiteId: '',
@@ -836,8 +840,9 @@ export default function Dashboard() {
   };
 
   const executeTopup = async () => {
-    if (!user || !topupConfirm.websiteId) return;
+    if (!user || !topupConfirm.websiteId || isTopupProcessing) return;
 
+    setIsTopupProcessing(true);
     try {
       const website = websites.find(w => w.id === topupConfirm.websiteId);
       if (!website) return;
@@ -846,6 +851,7 @@ export default function Dashboard() {
       if (website.teamId && !hasTeamPermission(website.teamId, 'topup', 'create')) {
         toast.error('คุณไม่มีสิทธิ์เติมเงินสำหรับเว็บไซต์นี้');
         setTopupConfirm({ show: false, websiteId: '', websiteName: '', amount: 0, note: '' });
+        setIsTopupProcessing(false);
         return;
       }
 
@@ -942,6 +948,8 @@ export default function Dashboard() {
     } catch (error) {
       // Error executing topup
       toast.error('ไม่สามารถเติมเงินได้');
+    } finally {
+      setIsTopupProcessing(false);
     }
   };
 
@@ -1957,9 +1965,16 @@ export default function Dashboard() {
                 </button>
                 <button
                   onClick={executeTopup}
-                  className="px-6 py-2.5 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-xl hover:from-green-600 hover:to-emerald-700 transition-all duration-300 shadow-lg hover:shadow-xl font-medium"
+                  disabled={isTopupProcessing}
+                  className="px-6 py-2.5 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-xl hover:from-green-600 hover:to-emerald-700 transition-all duration-300 shadow-lg hover:shadow-xl font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2"
                 >
-                  ยืนยันเติมเงิน
+                  {isTopupProcessing && (
+                    <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                  )}
+                  <span>{isTopupProcessing ? 'กำลังประมวลผล...' : 'ยืนยันเติมเงิน'}</span>
                 </button>
               </div>
             </div>

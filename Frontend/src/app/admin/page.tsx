@@ -36,6 +36,7 @@ export default function AdminPanel() {
   const [refreshing, setRefreshing] = useState(false);
   const [editingUser, setEditingUser] = useState<UserWithId | null>(null);
   const [newRole, setNewRole] = useState<'admin' | 'manager' | 'user'>('user');
+  const [isUpdatingRole, setIsUpdatingRole] = useState(false);
 
   // Cache system
   interface UsersCacheData {
@@ -191,7 +192,7 @@ export default function AdminPanel() {
 
   // Update user role
   const updateUserRole = async () => {
-    if (!editingUser || !user || !userProfile) return;
+    if (!editingUser || !user || !userProfile || isUpdatingRole) return;
 
     // ป้องกันไม่ให้ Admin แก้ไขสิทธิ์ตัวเอง
     if (editingUser.id === userProfile.uid) {
@@ -201,24 +202,45 @@ export default function AdminPanel() {
 
     const oldRole = editingUser.role;
 
+    // ตรวจสอบว่ามีการเปลี่ยนแปลง role หรือไม่
+    if (oldRole === newRole) {
+      toast('Role ไม่มีการเปลี่ยนแปลง', { icon: 'ℹ️' });
+      return;
+    }
+
+    setIsUpdatingRole(true);
+
     try {
+      // Prepare permissions data properly to avoid Firestore validation issues
+      const permissionsData = ROLE_PERMISSIONS[newRole].permissions.map(p => ({
+        resource: p.resource,
+        actions: [...p.actions]
+      }));
+
+      // Update user document with properly formatted data
       await updateDoc(doc(db, 'users', editingUser.id), {
         role: newRole,
-        permissions: ROLE_PERMISSIONS[newRole].permissions,
-        lastLogin: new Date().toISOString()
+        permissions: permissionsData,
+        lastLogin: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
       });
 
-      // Log the role change
-      await logRoleChange(
-        user.uid,
-        userProfile.email || user.email || '',
-        userProfile.username || userProfile.displayName || 'admin',
-        editingUser.id,
-        editingUser.email,
-        editingUser.displayName || editingUser.email?.split('@')[0] || 'ไม่ระบุชื่อ',
-        ROLE_PERMISSIONS[oldRole]?.label || oldRole,
-        ROLE_PERMISSIONS[newRole].label
-      );
+      // Log the role change (with try-catch to prevent blocking main operation)
+      try {
+        await logRoleChange(
+          user.uid,
+          userProfile.email || user.email || '',
+          userProfile.username || userProfile.displayName || 'admin',
+          editingUser.id,
+          editingUser.email,
+          editingUser.displayName || editingUser.email?.split('@')[0] || 'ไม่ระบุชื่อ',
+          ROLE_PERMISSIONS[oldRole]?.label || oldRole,
+          ROLE_PERMISSIONS[newRole].label
+        );
+      } catch (logError) {
+        console.warn('Failed to log role change:', logError);
+        // Don't fail the main operation if logging fails
+      }
 
       // Update local state
       setUsers(users.map(user => 
@@ -226,10 +248,7 @@ export default function AdminPanel() {
           ? { 
               ...user, 
               role: newRole, 
-              permissions: ROLE_PERMISSIONS[newRole].permissions.map(p => ({
-                resource: p.resource,
-                actions: [...p.actions]
-              }))
+              permissions: permissionsData
             }
           : user
       ));
@@ -238,8 +257,24 @@ export default function AdminPanel() {
       toast.success(`อัพเดท Role ของ ${editingUser.displayName} เป็น ${ROLE_PERMISSIONS[newRole].label} เรียบร้อย`);
       
     } catch (error) {
-      // Error updating user role
-      toast.error('ไม่สามารถอัพเดท Role ได้');
+      console.error('Error updating user role:', error);
+      
+      // More specific error messages
+      if (error instanceof Error) {
+        if (error.message.includes('permission-denied')) {
+          toast.error('ไม่มีสิทธิ์ในการแก้ไข Role ผู้ใช้');
+        } else if (error.message.includes('not-found')) {
+          toast.error('ไม่พบข้อมูลผู้ใช้ที่ต้องการแก้ไข');
+        } else if (error.message.includes('invalid-argument')) {
+          toast.error('ข้อมูลที่ส่งไม่ถูกต้อง กรุณาลองใหม่อีกครั้ง');
+        } else {
+          toast.error(`ไม่สามารถอัพเดท Role ได้: ${error.message}`);
+        }
+      } else {
+        toast.error('ไม่สามารถอัพเดท Role ได้ กรุณาลองใหม่อีกครั้ง');
+      }
+    } finally {
+      setIsUpdatingRole(false);
     }
   };
 
@@ -516,16 +551,27 @@ export default function AdminPanel() {
 
               <div className="flex justify-end space-x-3 mt-6">
                 <button
-                  onClick={() => setEditingUser(null)}
-                  className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-200 dark:bg-gray-600 rounded-md hover:bg-gray-300 dark:hover:bg-gray-500 transition-colors"
+                  onClick={() => {
+                    setEditingUser(null);
+                    setIsUpdatingRole(false);
+                  }}
+                  disabled={isUpdatingRole}
+                  className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-200 dark:bg-gray-600 rounded-md hover:bg-gray-300 dark:hover:bg-gray-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   ยกเลิก
                 </button>
                 <button
                   onClick={updateUserRole}
-                  className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 transition-colors"
+                  disabled={isUpdatingRole}
+                  className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2"
                 >
-                  บันทึก
+                  {isUpdatingRole && (
+                    <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                  )}
+                  <span>{isUpdatingRole ? 'กำลังอัพเดท...' : 'บันทึก'}</span>
                 </button>
               </div>
             </div>
