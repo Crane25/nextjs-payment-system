@@ -1174,47 +1174,27 @@ export default function Dashboard() {
   const statCards = [
     {
       title: 'ยอดเงินคงเหลือ',
-      subtitle: 'รวมทุกเว็บไซต์',
       value: `฿${getFilteredWebsites().reduce((sum, site: any) => sum + (site.balance || 0), 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
       icon: CurrencyDollarIcon,
-      color: 'from-emerald-500 via-green-500 to-teal-600',
-      bgPattern: 'bg-emerald-50 dark:bg-emerald-900/20',
-      iconBg: 'bg-gradient-to-br from-emerald-500 to-green-600',
-      trend: '+12%',
-      trendColor: 'text-emerald-600'
+      color: 'from-green-500 to-emerald-600'
     },
     {
       title: 'ยอดเติมรวมวันนี้',
-      subtitle: 'การเติมเงินล่าสุด',
       value: `฿${getFilteredWebsites().reduce((sum, site: any) => sum + (todayTopupByWebsite[site.id] || 0), 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
       icon: ArrowTrendingUpIcon,
-      color: 'from-blue-500 via-cyan-500 to-sky-600',
-      bgPattern: 'bg-blue-50 dark:bg-blue-900/20',
-      iconBg: 'bg-gradient-to-br from-blue-500 to-cyan-600',
-      trend: 'วันนี้',
-      trendColor: 'text-blue-600'
+      color: 'from-blue-500 to-cyan-600'
     },
     {
-      title: 'เว็บไซต์ทั้งหมด',
-      subtitle: 'จำนวนเว็บในระบบ',
+      title: 'เว็บทั้งหมด',
       value: `${getFilteredWebsites().length} เว็บ`,
       icon: GlobeAltIcon,
-      color: 'from-purple-500 via-violet-500 to-indigo-600',
-      bgPattern: 'bg-purple-50 dark:bg-purple-900/20',
-      iconBg: 'bg-gradient-to-br from-purple-500 to-indigo-600',
-      trend: `${getFilteredWebsites().filter((site: any) => site.status === 'active').length} เปิดใช้งาน`,
-      trendColor: 'text-purple-600'
+      color: 'from-purple-500 to-indigo-600'
     },
     {
-      title: 'สถานะระบบ',
-      subtitle: 'ประสิทธิภาพการทำงาน',
-      value: `${Math.round((getFilteredWebsites().filter((site: any) => site.status === 'active').length / Math.max(getFilteredWebsites().length, 1)) * 100)}%`,
+      title: 'เปิดใช้งานทั้งหมด',
+      value: `${getFilteredWebsites().filter((site: any) => site.status === 'active').length} เว็บ`,
       icon: ShoppingBagIcon,
-      color: 'from-orange-500 via-amber-500 to-yellow-600',
-      bgPattern: 'bg-orange-50 dark:bg-orange-900/20',
-      iconBg: 'bg-gradient-to-br from-orange-500 to-amber-600',
-      trend: 'ออนไลน์',
-      trendColor: 'text-orange-600'
+      color: 'from-indigo-500 to-purple-600'
     }
   ];
 
@@ -1282,63 +1262,27 @@ export default function Dashboard() {
         {/* Stats Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 lg:gap-8">
           {statCards.map((stat, index) => (
-            <div 
-              key={index} 
-              className={`group relative ${stat.bgPattern} rounded-2xl shadow-lg hover:shadow-2xl p-6 border border-white/50 dark:border-gray-700/50 hover:border-white/70 dark:hover:border-gray-600/70 transition-all duration-500 hover:scale-[1.02] overflow-hidden transform hover:-translate-y-1`}
-              style={{
-                animationDelay: `${index * 100}ms`
-              }}
-            >
-              {/* Background Pattern */}
-              <div className={`absolute inset-0 bg-gradient-to-br ${stat.color} opacity-0 group-hover:opacity-5 transition-opacity duration-500`}></div>
-              <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 dark:bg-gray-800/10 rounded-full -translate-y-16 translate-x-16 group-hover:scale-110 transition-transform duration-700"></div>
+            <div key={index} className="group relative bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm rounded-2xl shadow-lg hover:shadow-2xl p-5 border border-white/60 dark:border-gray-700/60 hover:border-white/80 dark:hover:border-gray-600/80 transition-all duration-300 hover:scale-[1.02] overflow-hidden">
+              <div className={`absolute inset-0 bg-gradient-to-br ${stat.color} opacity-0 group-hover:opacity-5 transition-opacity duration-300`}></div>
               
               <div className="relative z-10">
-                {/* Header */}
-                <div className="flex items-start justify-between mb-4">
-                  <div className={`w-14 h-14 ${stat.iconBg} rounded-2xl flex items-center justify-center shadow-lg group-hover:shadow-xl transition-all duration-500 group-hover:scale-110 group-hover:rotate-3`}>
-                    <stat.icon className="h-7 w-7 text-white" />
+                <div className="flex items-center justify-between mb-4">
+                  <div className={`w-12 h-12 bg-gradient-to-br ${stat.color} rounded-xl flex items-center justify-center shadow-lg group-hover:shadow-xl transition-all duration-300 group-hover:scale-110`}>
+                    <stat.icon className="h-6 w-6 text-white" />
                   </div>
-                  <div className="text-right">
-                    <div className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${stat.trendColor} bg-white/70 dark:bg-gray-800/70 backdrop-blur-sm`}>
-                      <span className="w-1.5 h-1.5 bg-current rounded-full mr-1.5 animate-pulse"></span>
-                      {stat.trend}
-                    </div>
-                  </div>
+                  <div className={`w-2 h-2 bg-gradient-to-r ${stat.color} rounded-full animate-pulse opacity-60`}></div>
                 </div>
                 
-                {/* Content */}
                 <div className="space-y-2">
-                  <div>
-                    <p className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">
-                      {stat.title}
-                    </p>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">
-                      {stat.subtitle}
-                    </p>
-                  </div>
-                  
-                  <p className="text-2xl font-bold text-gray-900 dark:text-white leading-tight">
+                  <p className="text-sm font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wide">
+                    {stat.title}
+                  </p>
+                  <p className="text-xl font-bold text-gray-900 dark:text-white">
                     {stat.value}
                   </p>
                 </div>
                 
-                {/* Progress Bar */}
-                <div className="mt-4">
-                  <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5 overflow-hidden">
-                    <div 
-                      className={`h-full bg-gradient-to-r ${stat.color} rounded-full transform scale-x-0 group-hover:scale-x-100 transition-transform duration-1000 origin-left`}
-                      style={{
-                        animationDelay: `${index * 200 + 500}ms`
-                      }}
-                    ></div>
-                  </div>
-                </div>
-                
-                {/* Floating Elements */}
-                <div className="absolute bottom-4 right-4 opacity-0 group-hover:opacity-20 transition-opacity duration-500">
-                  <div className={`w-8 h-8 bg-gradient-to-br ${stat.color} rounded-lg rotate-12 animate-pulse`}></div>
-                </div>
+                <div className={`mt-4 h-1 bg-gradient-to-r ${stat.color} rounded-full transform scale-x-0 group-hover:scale-x-100 transition-transform duration-500 origin-left`}></div>
               </div>
             </div>
           ))}
