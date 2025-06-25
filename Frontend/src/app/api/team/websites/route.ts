@@ -66,33 +66,40 @@ export async function GET(request: NextRequest) {
           id: doc.id,
           name: data.name,
           teamId: data.teamId,
-          isActive: data.isActive,
+          status: data.status,
           url: data.url
         });
       });
       
-      // Now get websites that are active
+      // Now get websites that are active (treat undefined as active for backward compatibility)
       console.log('Querying ACTIVE websites for team:', teamId);
       const websitesQuery = query(
         collection(db, 'websites'),
-        where('teamId', '==', teamId),
-        where('isActive', '==', true)
+        where('teamId', '==', teamId)
       );
       
       const websitesSnapshot = await getDocs(websitesQuery);
       console.log('Active websites query result:', websitesSnapshot.size, 'websites found');
       
-      // Format website data
-      const websites = websitesSnapshot.docs.map(doc => {
-        const data = doc.data();
-        console.log('Processing website:', data.name);
-        return {
-          name: data.name || 'ไม่ระบุชื่อ',
-          url: data.url || '',
-          apiKey: data.apiKey || '',
-          balance: data.balance || 0
-        };
-      });
+      // Format website data (only include websites with status === 'active')
+      const websites = websitesSnapshot.docs
+        .filter(doc => {
+          const data = doc.data();
+          const status = data.status;
+          console.log('Checking website:', data.name, 'status:', status);
+          // Include if status is 'active'
+          return status === 'active';
+        })
+        .map(doc => {
+          const data = doc.data();
+          console.log('Processing website:', data.name, 'status:', data.status);
+          return {
+            name: data.name || 'ไม่ระบุชื่อ',
+            url: data.url || '',
+            apiKey: data.apiKey || '',
+            balance: data.balance || 0
+          };
+        });
 
       console.log('Returning response with', websites.length, 'websites');
       

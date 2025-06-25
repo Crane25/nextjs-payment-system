@@ -432,22 +432,10 @@ export default function TopupHistory() {
           // Use cached statistics
           setAllTimeStats(cachedStats);
         } else {
-          // Try Firestore Aggregation API first, fallback to manual calculation
+          // Skip Aggregation API for now due to inaccurate today calculations
+          // Use manual calculation directly for accurate results
           try {
-            if (isAggregationSupported()) {
-              const aggregatedStats = await getTopupStatistics(currentUserTeamIds);
-              
-              setAllTimeStats(aggregatedStats);
-              
-              // Cache the aggregated statistics
-              statsCache.current = {
-                data: aggregatedStats,
-                expiry: now + STATS_CACHE_DURATION,
-                userTeamIds: currentUserTeamIds
-              };
-            } else {
-              throw new Error('Aggregation API not supported');
-            }
+            throw new Error('Using manual calculation for accurate today stats');
           } catch (aggregationError) {
             
             // Fallback to manual calculation if aggregation fails
@@ -501,10 +489,15 @@ export default function TopupHistory() {
           // Add indicator if we're likely showing partial statistics
           const isPartialStats = allStatsSnapshot.docs.length >= 10000;
           
-          // Calculate today's statistics
+          // Calculate today's statistics (with timezone fix)
           const todayRecords = relevantRecords.filter((record: any) => {
             const recordDate = new Date(record.timestamp);
-            return recordDate.toDateString() === today;
+            const todayDate = new Date();
+            
+            // Compare year, month, day only (ignoring time and timezone)
+            return recordDate.getFullYear() === todayDate.getFullYear() &&
+                   recordDate.getMonth() === todayDate.getMonth() &&
+                   recordDate.getDate() === todayDate.getDate();
           });
           
           const todayAmount = todayRecords.reduce((sum: number, record: any) => sum + (record.amount || 0), 0);

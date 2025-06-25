@@ -667,6 +667,7 @@ export default function Dashboard() {
         url: newWebsite.url,
         apiKey: newWebsite.apiKey,
         status: 'inactive',
+        isActive: true, // Set website as active by default
         balance: 0,
         dailyTopup: 0,
         teamId: selectedTeam.id,

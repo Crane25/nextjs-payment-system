@@ -43,8 +43,8 @@ export async function getTopupStatistics(userTeamIds: string[]): Promise<TopupSt
     // For now, return simplified statistics to avoid index requirements
     // These would require separate queries with proper indexes
     const completedTransactions = Math.floor(totalTransactions * 0.95); // Estimate
-    const todayAmount = Math.floor(totalAmount * 0.1); // Estimate
-    const todayTransactions = Math.floor(totalTransactions * 0.1); // Estimate
+    const todayAmount = 0; // Set to 0 since we can't calculate properly without manual filtering
+    const todayTransactions = 0; // Set to 0 since we can't calculate properly without manual filtering
     
     return {
       totalAmount,
@@ -147,8 +147,8 @@ export async function getWithdrawStatistics(userTeamIds: string[]): Promise<Topu
     // For now, return simplified statistics to avoid index requirements
     // These would require separate queries with proper indexes
     const completedTransactions = Math.floor(totalTransactions * 0.95); // Estimate
-    const todayAmount = Math.floor(totalAmount * 0.1); // Estimate
-    const todayTransactions = Math.floor(totalTransactions * 0.1); // Estimate
+    const todayAmount = 0; // Set to 0 since we can't calculate properly without manual filtering
+    const todayTransactions = 0; // Set to 0 since we can't calculate properly without manual filtering
     
     return {
       totalAmount,
