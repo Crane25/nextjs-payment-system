@@ -1355,7 +1355,6 @@ export default function Dashboard() {
                   <th className="text-left py-3 px-4 font-semibold text-gray-900 dark:text-white">API Key</th>
                   <th className="text-center py-3 px-4 font-semibold text-gray-900 dark:text-white">คงเหลือ</th>
                   <th className="text-center py-3 px-4 font-semibold text-gray-900 dark:text-white">ยอดเติมวันนี้</th>
-                  <th className="text-center py-3 px-4 font-semibold text-gray-900 dark:text-white">ยอดถอนวันนี้</th>
                   <th className="text-center py-3 px-4 font-semibold text-gray-900 dark:text-white">สถานะ</th>
                   <th className="text-center py-3 px-4 font-semibold text-gray-900 dark:text-white">การจัดการ</th>
                 </tr>
@@ -1363,7 +1362,7 @@ export default function Dashboard() {
               <tbody>
                 {loading ? (
                   <tr>
-                    <td colSpan={8} className="py-8 text-center">
+                    <td colSpan={7} className="py-8 text-center">
                       <div className="flex items-center justify-center">
                         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
                         <span className="ml-2 text-gray-500 dark:text-gray-400">กำลังโหลดข้อมูล...</span>
@@ -1372,7 +1371,7 @@ export default function Dashboard() {
                   </tr>
                 ) : websites.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="py-8 text-center">
+                    <td colSpan={7} className="py-8 text-center">
                       <div className="text-gray-500 dark:text-gray-400">
                         <GlobeAltIcon className="h-12 w-12 mx-auto mb-2 opacity-50" />
                         <p>ยังไม่มีเว็บไซต์</p>
@@ -1391,7 +1390,7 @@ export default function Dashboard() {
                     <React.Fragment key={teamId}>
                       {/* Team Header */}
                       <tr className="bg-gray-50 dark:bg-gray-700/30">
-                        <td colSpan={8} className="py-3 px-4">
+                        <td colSpan={7} className="py-3 px-4">
                           <div className="flex items-center space-x-2">
                             <div className="w-3 h-3 bg-gradient-to-r from-blue-500 to-purple-600 rounded-full"></div>
                             <span className="font-semibold text-gray-900 dark:text-white">
@@ -1451,9 +1450,6 @@ export default function Dashboard() {
                           </td>
                           <td className="py-4 px-4 text-center">
                             <div className="font-bold text-blue-600 dark:text-blue-400">฿{(todayTopupByWebsite[website.id] || 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
-                          </td>
-                          <td className="py-4 px-4 text-center">
-                            <div className="font-bold text-orange-600 dark:text-orange-400">฿{(todayWithdrawByWebsite[website.id] || 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
                           </td>
                           <td className="py-4 px-4 text-center">
                             <div className="flex items-center justify-center">
