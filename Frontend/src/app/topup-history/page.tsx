@@ -1156,7 +1156,9 @@ export default function TopupHistory() {
                     <th className="text-left py-3 px-4 font-semibold text-gray-900 dark:text-white">ทีม</th>
                   )}
                   <th className="text-left py-3 px-4 font-semibold text-gray-900 dark:text-white">ผู้เติมเงิน</th>
-                  <th className="text-center py-3 px-4 font-semibold text-gray-900 dark:text-white">จำนวนเงิน</th>
+                  <th className="text-center py-3 px-4 font-semibold text-gray-900 dark:text-white">จำนวนเติม</th>
+                  <th className="text-center py-3 px-4 font-semibold text-gray-900 dark:text-white">ยอดก่อนเติม</th>
+                  <th className="text-center py-3 px-4 font-semibold text-gray-900 dark:text-white">ยอดหลังเติม</th>
                   <th className="text-left py-3 px-4 font-semibold text-gray-900 dark:text-white">หมายเหตุ</th>
                   <th className="text-center py-3 px-4 font-semibold text-gray-900 dark:text-white">สถานะ</th>
                 </tr>
@@ -1164,7 +1166,7 @@ export default function TopupHistory() {
               <tbody>
                 {(loading || teamsLoading) ? (
                   <tr>
-                    <td colSpan={teams.length > 1 ? 7 : 6} className="py-8 text-center">
+                    <td colSpan={teams.length > 1 ? 9 : 8} className="py-8 text-center">
                       <div className="flex items-center justify-center">
                         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
                         <span className="ml-2 text-gray-500 dark:text-gray-400">
@@ -1175,7 +1177,7 @@ export default function TopupHistory() {
                   </tr>
                 ) : teams.length === 0 && !teamsLoading ? (
                   <tr>
-                    <td colSpan={teams.length > 1 ? 7 : 6} className="py-8 text-center">
+                    <td colSpan={teams.length > 1 ? 9 : 8} className="py-8 text-center">
                       <div className="text-gray-500 dark:text-gray-400">
                         <UserGroupIcon className="h-12 w-12 mx-auto mb-2 opacity-50" />
                         <p>ไม่พบทีมที่เข้าร่วม</p>
@@ -1185,7 +1187,7 @@ export default function TopupHistory() {
                   </tr>
                 ) : getFilteredHistory().length === 0 ? (
                   <tr>
-                    <td colSpan={teams.length > 1 ? 7 : 6} className="py-8 text-center">
+                    <td colSpan={teams.length > 1 ? 9 : 8} className="py-8 text-center">
                       <div className="text-gray-500 dark:text-gray-400">
                         <CurrencyDollarIcon className="h-12 w-12 mx-auto mb-2 opacity-50" />
                         <p>ไม่พบประวัติการเติมเงิน</p>
@@ -1230,16 +1232,27 @@ export default function TopupHistory() {
                         </div>
                       </td>
                       <td className="py-4 px-4 text-center">
-                        <div className="space-y-1">
-                          <div className="font-bold text-green-600 dark:text-green-400">
-                            +฿{record.amount.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                          </div>
-                          {record.balanceAfter !== undefined && (
-                            <div className="text-xs text-gray-500 dark:text-gray-400">
-                              คงเหลือ: ฿{record.balanceAfter.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                            </div>
-                          )}
+                        <div className="font-bold text-green-600 dark:text-green-400">
+                          +฿{record.amount.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </div>
+                      </td>
+                      <td className="py-4 px-4 text-center">
+                        {record.balanceAfter !== undefined ? (
+                          <div className="font-medium text-gray-700 dark:text-gray-300">
+                            ฿{(record.balanceAfter - record.amount).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </div>
+                        ) : (
+                          <span className="text-gray-400 dark:text-gray-500 text-sm italic">-</span>
+                        )}
+                      </td>
+                      <td className="py-4 px-4 text-center">
+                        {record.balanceAfter !== undefined ? (
+                          <div className="font-bold text-blue-600 dark:text-blue-400">
+                            ฿{record.balanceAfter.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </div>
+                        ) : (
+                          <span className="text-gray-400 dark:text-gray-500 text-sm italic">-</span>
+                        )}
                       </td>
                       <td className="py-4 px-4">
                         {record.note ? (
