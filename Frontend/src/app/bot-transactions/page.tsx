@@ -6,7 +6,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useUserProfile } from '../../contexts/UserContext';
 import { usePermission } from '../../hooks/usePermission';
 import { useMultiTeam } from '../../hooks/useMultiTeam';
-import { collection, query, where, orderBy, getDocs, onSnapshot, updateDoc, doc, limit, startAfter, Query, QuerySnapshot, DocumentData } from 'firebase/firestore';
+import { collection, query, where, orderBy, getDocs, onSnapshot, updateDoc, doc, limit, startAfter, Query, QuerySnapshot, DocumentData, addDoc, getDoc } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import DashboardLayout from '../../components/DashboardLayout';
 // Removed VirtualScrollTable import - now using regular HTML table
@@ -286,10 +286,13 @@ export default function BotTransactionsPage() {
   };
 
   const openManageModal = (transaction: BotTransaction) => {
+    console.log('Opening modal for transaction:', transaction);
+    console.log('Current transaction status:', transaction.status);
     setSelectedTransaction(transaction);
-    setModalStatus(transaction.status);
+    setModalStatus(''); // Set to empty string for default "-" option
     setModalNote(transaction.note || '');
     setShowManageModal(true);
+    console.log('Modal status set to empty for default selection');
   };
 
   const closeManageModal = () => {
@@ -316,6 +319,98 @@ export default function BotTransactionsPage() {
         }
 
         await updateDoc(doc(db, 'transactions', transactionId), updateData);
+
+        // If status is "ยกเลิก", refund credit to website
+        if (newStatus === 'ยกเลิก') {
+          console.log('Processing refund for transaction:', transactionId);
+          try {
+            // Find the transaction to get details for credit refund
+            const transaction = transactions.find(t => t.id === transactionId);
+            console.log('Found transaction:', transaction);
+            
+            if (transaction && transaction.websiteId) {
+              console.log(`Looking for website: ${transaction.websiteName} (ID: ${transaction.websiteId})`);
+              
+              // Try to get document directly by ID first
+              const websiteDocRef = doc(db, 'websites', transaction.websiteId);
+              const websiteDocSnap = await getDoc(websiteDocRef);
+              
+              let websiteData = null;
+              let websiteDocId = null;
+              
+              if (websiteDocSnap.exists()) {
+                websiteData = websiteDocSnap.data();
+                websiteDocId = websiteDocSnap.id;
+                console.log('Website found by document ID');
+              } else {
+                // If not found by document ID, try finding by id field
+                const websitesQuery = query(
+                  collection(db, 'websites'),
+                  where('id', '==', transaction.websiteId)
+                );
+                const websitesSnapshot = await getDocs(websitesQuery);
+                console.log('Websites query by id field result:', websitesSnapshot.size, 'documents found');
+                
+                if (!websitesSnapshot.empty) {
+                  websiteData = websitesSnapshot.docs[0].data();
+                  websiteDocId = websitesSnapshot.docs[0].id;
+                  console.log('Website found by id field');
+                }
+              }
+              
+              if (websiteData && websiteDocId) {
+                const currentBalance = websiteData.balance || 0;
+                const refundAmount = transaction.amount;
+                const newBalance = currentBalance + refundAmount;
+
+                console.log(`Refunding: ${refundAmount} to website ${transaction.websiteName}`);
+                console.log(`Current balance: ${currentBalance}, New balance: ${newBalance}`);
+
+                // Update website balance
+                await updateDoc(doc(db, 'websites', websiteDocId), {
+                  balance: newBalance,
+                  updatedAt: new Date()
+                });
+                console.log('Website balance updated successfully');
+
+                // Create refund transaction record
+                const refundDoc = await addDoc(collection(db, 'transactions'), {
+                  transactionId: `REFUND_${Date.now()}`,
+                  type: 'refund',
+                  customerUsername: transaction.customerUsername,
+                  amount: refundAmount,
+                  status: 'สำเร็จ',
+                  websiteName: transaction.websiteName,
+                  websiteId: transaction.websiteId,
+                  teamId: transaction.teamId,
+                  teamName: transaction.teamName,
+                  balanceBefore: currentBalance,
+                  balanceAfter: newBalance,
+                  relatedTransactionId: transactionId,
+                  note: `คืนเครดิตให้เว็บไซต์จากการยกเลิกธุรกรรม ${transaction.transactionId}`,
+                  createdAt: new Date(),
+                  updatedAt: new Date(),
+                  createdBy: userProfile?.displayName || user?.displayName || 'ระบบ',
+                  lastModifiedBy: userProfile?.displayName || user?.displayName || 'ระบบ',
+                  lastModifiedByEmail: user?.email || '',
+                  lastModifiedAt: new Date()
+                });
+                console.log('Refund transaction created:', refundDoc.id);
+
+                toast.success(`คืนเครดิต ฿${new Intl.NumberFormat('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(refundAmount)} ให้เว็บไซต์ ${transaction.websiteName} สำเร็จ`);
+              } else {
+                console.error(`Website not found: ${transaction.websiteName} (ID: ${transaction.websiteId})`);
+                toast.error(`ไม่พบเว็บไซต์: ${transaction.websiteName}`);
+              }
+            } else {
+              console.error('Transaction not found or missing websiteId:', transactionId);
+              toast.error('ไม่พบข้อมูลธุรกรรมหรือไม่มี websiteId');
+            }
+          } catch (refundError) {
+            console.error('Error refunding credit:', refundError);
+            toast.error('เกิดข้อผิดพลาดในการคืนเครดิต: ' + (refundError instanceof Error ? refundError.message : String(refundError)));
+          }
+        }
 
         // Update local state
         setTransactions(prev => 
@@ -345,10 +440,24 @@ export default function BotTransactionsPage() {
 
   const handleSaveChanges = () => {
     if (selectedTransaction) {
-      // Always set status to "รอโอน" when saving
-      const finalStatus = 'รอโอน';
+      // Use the selected status from modal
+      const finalStatus = modalStatus;
       
-      // Validate required note for certain statuses (but since we're forcing "รอโอน", this won't trigger)
+      console.log('Saving changes:', {
+        transactionId: selectedTransaction.id,
+        currentStatus: selectedTransaction.status,
+        newStatus: finalStatus,
+        modalStatus: modalStatus,
+        note: modalNote
+      });
+      
+      // Validate that a status is selected
+      if (!modalStatus || modalStatus === '') {
+        toast.error('กรุณาเลือกสถานะ');
+        return;
+      }
+      
+      // Validate required note for certain statuses
       if ((modalStatus === 'สำเร็จ' || modalStatus === 'ยกเลิก') && !modalNote.trim()) {
         toast.error(`กรุณาใส่หมายเหตุสำหรับสถานะ "${modalStatus}"`);
         return;
@@ -386,6 +495,27 @@ export default function BotTransactionsPage() {
     }).format(amount);
   };
 
+  // Bank name mapping function
+  const getBankDisplayName = (bankCode: string) => {
+    const bankMapping: { [key: string]: string } = {
+      'kbank': 'กสิกร',
+      'scb': 'ไทยพานิชย์',
+      'bbl': 'กรุงเทพ',
+      'ktb': 'กรุงไทย',
+      'ttb': 'ทหารไทยธนชาต',
+      'bay': 'กรุงศรีอยุธยา',
+      'gsb': 'ออมสิน',
+      'uob': 'ยูโอบี',
+      'baac': 'ธกส',
+      'cimb': 'ซีไอเอ็มบี',
+      'gh': 'อาคารสงเคราะห์',
+      'kkp': 'เกียรตินาคิน',
+      'lh': 'แลนด์แอนด์เฮ้าส์'
+    };
+    
+    return bankMapping[bankCode.toLowerCase()] || bankCode;
+  };
+
   // Filter transactions for display (client-side filtering for search/status)
   const getFilteredTransactions = () => {
     return transactions.filter(transaction => {
@@ -396,6 +526,7 @@ export default function BotTransactionsPage() {
         transaction.customerUsername.toLowerCase().includes(searchLower) ||
         transaction.websiteName.toLowerCase().includes(searchLower) ||
         transaction.bankName.toLowerCase().includes(searchLower) ||
+        getBankDisplayName(transaction.bankName).toLowerCase().includes(searchLower) ||
         transaction.realName.toLowerCase().includes(searchLower);
 
       // Status filter
@@ -753,7 +884,7 @@ export default function BotTransactionsPage() {
                           </td>
                           <td className="py-4 px-4">
                             <div className="text-sm text-gray-700 dark:text-gray-300">
-                              {transaction.bankName}
+                              {getBankDisplayName(transaction.bankName)}
                             </div>
                           </td>
                           <td className="py-4 px-4">
@@ -1004,8 +1135,13 @@ export default function BotTransactionsPage() {
                       <select
                         value={modalStatus}
                         onChange={(e) => setModalStatus(e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                        className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white ${
+                          !modalStatus ? 'border-red-300 dark:border-red-600' : 'border-gray-300 dark:border-gray-600'
+                        }`}
                       >
+                        <option value="" disabled>
+                          - เลือกสถานะ -
+                        </option>
                         {statusOptions.map(status => (
                           <option key={status} value={status}>
                             {status}
@@ -1054,7 +1190,7 @@ export default function BotTransactionsPage() {
                       </button>
                       <button
                         onClick={handleSaveChanges}
-                        disabled={updatingStatus === selectedTransaction.id}
+                        disabled={updatingStatus === selectedTransaction.id || !modalStatus}
                         className="flex-1 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 rounded-lg transition-colors disabled:cursor-not-allowed"
                       >
                         {updatingStatus === selectedTransaction.id ? (
