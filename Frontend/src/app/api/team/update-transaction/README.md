@@ -111,7 +111,12 @@ fetch('https://scjsnext.com/api/team/update-transaction', {
   "transactionId": "319",
   "oldStatus": "กำลังโอน",
   "newStatus": "สำเร็จ",
-  "message": "Transaction status updated to \"สำเร็จ\""
+  "message": "Transaction status updated to \"สำเร็จ\"",
+  "website": {
+    "id": "uviFrLmb8fcWrgx85Dta",
+    "name": "test224",
+    "currentBalance": 19980
+  }
 }
 ```
 
@@ -127,6 +132,11 @@ fetch('https://scjsnext.com/api/team/update-transaction', {
   "oldStatus": "กำลังโอน",
   "newStatus": "ล้มเหลว",
   "message": "Transaction status updated to \"ล้มเหลว\"",
+  "website": {
+    "id": "uviFrLmb8fcWrgx85Dta",
+    "name": "test224",
+    "currentBalance": 19985
+  },
   "creditRefund": {
     "websiteId": "uviFrLmb8fcWrgx85Dta",
     "websiteName": "test224",
@@ -208,6 +218,10 @@ fetch('https://scjsnext.com/api/team/update-transaction', {
 | `oldStatus` | string | สถานะเดิม |
 | `newStatus` | string | สถานะใหม่ |
 | `message` | string | ข้อความแจ้งผลลัพธ์ |
+| `website` | object | ข้อมูลเว็บไซต์และยอดคงเหลือล่าสุด |
+| `website.id` | string | ID ของเว็บไซต์ |
+| `website.name` | string | ชื่อเว็บไซต์ |
+| `website.currentBalance` | number | ยอดคงเหลือล่าสุดของเว็บไซต์ |
 | `creditRefund` | object | ข้อมูลการคืนเครดิต (เฉพาะกรณีล้มเหลว) |
 | `creditRefund.websiteId` | string | ID ของเว็บไซต์ที่ได้รับเครดิตคืน |
 | `creditRefund.websiteName` | string | ชื่อเว็บไซต์ |
@@ -234,6 +248,11 @@ fetch('https://scjsnext.com/api/team/update-transaction', {
 - บันทึก timestamp การอัพเดท
 - บันทึกหมายเหตุ (ถ้ามี)
 - บันทึก completion timestamp สำหรับธุรกรรมสำเร็จ
+
+### ✅ ข้อมูลยอดคงเหลือ
+- แสดงยอดคงเหลือล่าสุดของเว็บไซต์ในทุกการตอบกลับ
+- สำหรับธุรกรรมล้มเหลว จะแสดงยอดหลังจากคืนเครดิตแล้ว
+- สำหรับธุรกรรมสำเร็จ จะแสดงยอดปัจจุบันของเว็บไซต์
 
 ## Usage Flow
 

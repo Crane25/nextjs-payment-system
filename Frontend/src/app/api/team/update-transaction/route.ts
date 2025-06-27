@@ -141,6 +141,7 @@ export async function POST(request: NextRequest) {
       let websiteUpdated = false;
       let refundAmount = 0;
       let websiteName = '';
+      let currentWebsiteBalance = 0;
       
       if (requestData.status === 'ล้มเหลว' && transactionData.type === 'withdraw') {
         console.log('Processing credit refund for failed withdrawal...');
@@ -157,6 +158,7 @@ export async function POST(request: NextRequest) {
               refundAmount = transactionData.amount;
               const newBalance = currentBalance + refundAmount;
               websiteName = websiteData.name || 'Unknown Website';
+              currentWebsiteBalance = newBalance; // Store the new balance after refund
               
               console.log('Refunding credit:', {
                 websiteId: transactionData.websiteId,
@@ -189,6 +191,23 @@ export async function POST(request: NextRequest) {
             );
           }
         }
+      } else {
+        // For non-refund cases, get current website balance for display
+        if (transactionData.websiteId) {
+          try {
+            const websiteDocRef = doc(db, 'websites', transactionData.websiteId);
+            const websiteDoc = await getDoc(websiteDocRef);
+            
+            if (websiteDoc.exists()) {
+              const websiteData = websiteDoc.data();
+              currentWebsiteBalance = websiteData.balance || 0;
+              websiteName = websiteData.name || 'Unknown Website';
+            }
+          } catch (balanceError) {
+            console.error('Error getting website balance:', balanceError);
+            // Continue without balance info
+          }
+        }
       }
 
       // Update transaction status
@@ -219,7 +238,12 @@ export async function POST(request: NextRequest) {
         transactionId: transactionData.transactionId || '',
         oldStatus: transactionData.status,
         newStatus: requestData.status,
-        message: `Transaction status updated to "${requestData.status}"`
+        message: `Transaction status updated to "${requestData.status}"`,
+        website: {
+          id: transactionData.websiteId || '',
+          name: websiteName || 'Unknown Website',
+          currentBalance: currentWebsiteBalance
+        }
       };
 
       // Add refund information if applicable
