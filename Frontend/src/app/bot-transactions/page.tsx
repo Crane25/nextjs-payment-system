@@ -109,14 +109,7 @@ export default function BotTransactionsPage() {
   const { hasPermission, isUser } = usePermission();
   const { teams, loading: teamsLoading, error: teamsError } = useMultiTeam();
   
-  // Debug teams data
-  useEffect(() => {
-    console.log('bot-transactions: teams data', { 
-      teams: teams.map(t => ({ id: t.id, name: t.name })), 
-      teamsLoading, 
-      teamsError 
-    });
-  }, [teams, teamsLoading, teamsError]);
+  // Teams data loaded - removed debug logging
 
   const [transactions, setTransactions] = useState<BotTransaction[]>([]);
   const [loading, setLoading] = useState(true);
@@ -208,7 +201,6 @@ export default function BotTransactionsPage() {
           );
 
           const teamSnapshot = await getDocs(teamQuery);
-          console.log(`Team ${teamId}: Found ${teamSnapshot.docs.length} transactions`);
           allTransactionDocs.push(...teamSnapshot.docs);
         } catch (error) {
           console.warn(`Error loading team ${teamId} transactions:`, error);
@@ -253,16 +245,11 @@ export default function BotTransactionsPage() {
         } as BotTransaction;
       });
 
-      console.log(`Total transactions loaded: ${allTransactions.length}`);
-      
       // Filter for bot transactions on client-side since we simplified the query
       const botTransactions = allTransactions.filter(record => 
         record.type === 'withdraw' && 
         record.createdBy === 'api'
       );
-
-      console.log(`Bot transactions found: ${botTransactions.length}`);
-      console.log('Sample bot transaction:', botTransactions[0]);
 
       // Filter based on user role and permissions
       let filteredRecords: BotTransaction[];
@@ -280,8 +267,6 @@ export default function BotTransactionsPage() {
           record.teamId && userTeamIds.includes(record.teamId)
         );
       }
-
-      console.log(`Filtered records: ${filteredRecords.length}`);
 
       // Store all filtered records for client-side pagination
       setTransactions(filteredRecords);
@@ -328,13 +313,10 @@ export default function BotTransactionsPage() {
   };
 
   const openManageModal = (transaction: BotTransaction) => {
-    console.log('Opening modal for transaction:', transaction);
-    console.log('Current transaction status:', transaction.status);
     setSelectedTransaction(transaction);
     setModalStatus(''); // Set to empty string for default "-" option
     setModalNote(transaction.note || '');
     setShowManageModal(true);
-    console.log('Modal status set to empty for default selection');
   };
 
   const closeManageModal = () => {
@@ -364,15 +346,11 @@ export default function BotTransactionsPage() {
 
         // If status is "ยกเลิก", refund credit to website
         if (newStatus === 'ยกเลิก') {
-          console.log('Processing refund for transaction:', transactionId);
           try {
             // Find the transaction to get details for credit refund
             const transaction = transactions.find(t => t.id === transactionId);
-            console.log('Found transaction:', transaction);
             
             if (transaction && transaction.websiteId) {
-              console.log(`Looking for website: ${transaction.websiteName} (ID: ${transaction.websiteId})`);
-              
               // Try to get document directly by ID first
               const websiteDocRef = doc(db, 'websites', transaction.websiteId);
               const websiteDocSnap = await getDoc(websiteDocRef);
@@ -383,7 +361,6 @@ export default function BotTransactionsPage() {
               if (websiteDocSnap.exists()) {
                 websiteData = websiteDocSnap.data();
                 websiteDocId = websiteDocSnap.id;
-                console.log('Website found by document ID');
               } else {
                 // If not found by document ID, try finding by id field
                 const websitesQuery = query(
@@ -391,12 +368,10 @@ export default function BotTransactionsPage() {
                   where('id', '==', transaction.websiteId)
                 );
                 const websitesSnapshot = await getDocs(websitesQuery);
-                console.log('Websites query by id field result:', websitesSnapshot.size, 'documents found');
                 
                 if (!websitesSnapshot.empty) {
                   websiteData = websitesSnapshot.docs[0].data();
                   websiteDocId = websitesSnapshot.docs[0].id;
-                  console.log('Website found by id field');
                 }
               }
               
@@ -405,15 +380,11 @@ export default function BotTransactionsPage() {
                 const refundAmount = transaction.amount;
                 const newBalance = currentBalance + refundAmount;
 
-                console.log(`Refunding: ${refundAmount} to website ${transaction.websiteName}`);
-                console.log(`Current balance: ${currentBalance}, New balance: ${newBalance}`);
-
                 // Update website balance
                 await updateDoc(doc(db, 'websites', websiteDocId), {
                   balance: newBalance,
                   updatedAt: new Date()
                 });
-                console.log('Website balance updated successfully');
 
                 // Create refund transaction record
                 const refundDoc = await addDoc(collection(db, 'transactions'), {
@@ -437,7 +408,6 @@ export default function BotTransactionsPage() {
                   lastModifiedByEmail: user?.email || '',
                   lastModifiedAt: new Date()
                 });
-                console.log('Refund transaction created:', refundDoc.id);
 
                 toast.success(`คืนเครดิต ฿${new Intl.NumberFormat('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(refundAmount)} ให้เว็บไซต์ ${transaction.websiteName} สำเร็จ`);
               } else {
@@ -484,14 +454,6 @@ export default function BotTransactionsPage() {
     if (selectedTransaction) {
       // Use the selected status from modal
       const finalStatus = modalStatus;
-      
-      console.log('Saving changes:', {
-        transactionId: selectedTransaction.id,
-        currentStatus: selectedTransaction.status,
-        newStatus: finalStatus,
-        modalStatus: modalStatus,
-        note: modalNote
-      });
       
       // Validate that a status is selected
       if (!modalStatus || modalStatus === '') {

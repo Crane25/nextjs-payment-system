@@ -763,7 +763,6 @@ export default function Dashboard() {
         const topupDeletePromises = topupSnapshot.docs.map(doc => deleteDoc(doc.ref));
         await Promise.all(topupDeletePromises);
         
-        console.log(`Deleted ${topupSnapshot.docs.length} topup history records for website ${deleteConfirm.websiteId}`);
       } catch (error) {
         console.error('Error deleting topup history:', error);
         // Continue with deletion even if history cleanup fails
@@ -781,7 +780,6 @@ export default function Dashboard() {
         const withdrawDeletePromises = withdrawSnapshot.docs.map(doc => deleteDoc(doc.ref));
         await Promise.all(withdrawDeletePromises);
         
-        console.log(`Deleted ${withdrawSnapshot.docs.length} withdraw history records for website ${deleteConfirm.websiteId}`);
       } catch (error) {
         console.error('Error deleting withdraw history:', error);
         // Continue with deletion even if history cleanup fails

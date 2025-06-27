@@ -51,14 +51,7 @@ export default function TopupHistory() {
   const { canViewTopup } = usePermission();
   const { teams, loading: teamsLoading, error: teamsError } = useMultiTeam();
   
-  // Debug teams data
-  useEffect(() => {
-    console.log('topup-history: teams data', { 
-      teams: teams.map(t => ({ id: t.id, name: t.name })), 
-      teamsLoading, 
-      teamsError 
-    });
-  }, [teams, teamsLoading, teamsError]);
+    // Teams data loaded - removed debug logging
   const [topupHistory, setTopupHistory] = useState<TopupRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);

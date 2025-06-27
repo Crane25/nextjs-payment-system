@@ -19,7 +19,7 @@ try {
   }
   
   adminDb = getFirestore(adminApp);
-  console.log('✅ Firebase Admin SDK initialized successfully');
+  // Firebase Admin SDK initialized successfully
 } catch (error) {
   console.error('❌ Firebase Admin SDK initialization error:', error);
   throw new Error('Firebase Admin SDK initialization failed');

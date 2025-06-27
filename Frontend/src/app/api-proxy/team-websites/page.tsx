@@ -21,8 +21,6 @@ export default function TeamWebsitesProxy() {
     setResult(null);
 
     try {
-      console.log('Searching for team with API key:', apiKey);
-
       // Find team by API key
       const teamsQuery = query(
         collection(db, 'teams'),
@@ -30,7 +28,6 @@ export default function TeamWebsitesProxy() {
       );
       
       const teamsSnapshot = await getDocs(teamsQuery);
-      console.log('Teams found:', teamsSnapshot.size);
       
       if (teamsSnapshot.empty) {
         setError('ไม่พบทีมที่ใช้ API Key นี้');
@@ -41,7 +38,6 @@ export default function TeamWebsitesProxy() {
       const teamDoc = teamsSnapshot.docs[0];
       const teamId = teamDoc.id;
       const teamName = teamDoc.data().name;
-      console.log('Found team:', teamId, 'name:', teamName);
       
       // Get websites for this team that are active
       const websitesQuery = query(
@@ -51,7 +47,6 @@ export default function TeamWebsitesProxy() {
       );
       
       const websitesSnapshot = await getDocs(websitesQuery);
-      console.log('Websites found:', websitesSnapshot.size);
       
       // Format website data
       const websites = websitesSnapshot.docs.map(doc => {

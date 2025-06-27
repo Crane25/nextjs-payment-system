@@ -55,13 +55,7 @@ export const useMultiTeam = (mode: 'all' | 'owned' = 'all') => {
       setLoading(true);
       setError(null);
       
-      console.log('useMultiTeam: Starting fetch', {
-        userId: user.uid,
-        userRole: userProfile.role,
-        userEmail: userProfile.email,
-        mode,
-        cacheKey
-      });
+
 
       
       let teamsQuery;
@@ -86,10 +80,7 @@ export const useMultiTeam = (mode: 'all' | 'owned' = 'all') => {
           const membersSnapshot = await getDocs(membersQuery);
           const userTeamIds = membersSnapshot.docs.map(doc => doc.data().teamId);
           
-          console.log('useMultiTeam: Admin found team memberships', {
-            userTeamIds,
-            memberDocs: membersSnapshot.docs.map(doc => ({ id: doc.id, data: doc.data() }))
-          });
+
           
           if (userTeamIds.length > 0) {
             if (userTeamIds.length === 1) {
@@ -312,15 +303,6 @@ export const useMultiTeam = (mode: 'all' | 'owned' = 'all') => {
       teamsData.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
 
 
-      // Debug logging
-      console.log('useMultiTeam: teams loaded', {
-        mode,
-        userRole: userProfile.role,
-        teamCount: teamsData.length,
-        userTeamIds: teamIds,
-        teams: teamsData.map(t => ({ id: t.id, name: t.name, ownerId: t.ownerId }))
-      });
-
       // Ensure we have valid data before setting
       if (Array.isArray(teamsData)) {
         setTeams(teamsData);
@@ -360,7 +342,6 @@ export const useMultiTeam = (mode: 'all' | 'owned' = 'all') => {
     error,
     canViewTeams: hasPermission('teams', 'read') || !!userProfile?.teamId,
     refreshTeams: () => {
-      console.log('useMultiTeam: Refreshing teams - clearing cache');
       cacheMap.clear(); // Clear all cache
       fetchTeamsOptimized(true);
     }

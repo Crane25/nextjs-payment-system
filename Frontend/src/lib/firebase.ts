@@ -17,7 +17,7 @@ try {
   
   // Only log success in development
   if (config.app.isDevelopment) {
-    console.log('✅ Firebase initialized successfully');
+    // Firebase initialized successfully
   }
 } catch (error) {
   // Log error but don't expose sensitive details
@@ -36,14 +36,11 @@ export const testFirebaseConnection = async () => {
   if (!config.app.isDevelopment) return;
   
   try {
-    console.log('🧪 Testing Firebase connection...');
-    
     // Test Firestore connection
     const { collection, getDocs } = await import('firebase/firestore');
     const testCollection = collection(db, '__test__');
     await getDocs(testCollection);
     
-    console.log('✅ Firestore connection successful');
     return true;
   } catch (error) {
     console.error('❌ Firebase connection test failed:', error);

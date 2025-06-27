@@ -4,14 +4,10 @@ import { db } from '@/lib/firebase';
 
 export async function POST(request: NextRequest) {
   try {
-    console.log('API called: /api/team/update-transaction');
-    
     // Get API key from Authorization header
     const authHeader = request.headers.get('Authorization');
-    console.log('Authorization header:', authHeader ? 'Present' : 'Missing');
     
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      console.log('Invalid authorization header format');
       return NextResponse.json(
         { 
           success: false,
@@ -22,11 +18,9 @@ export async function POST(request: NextRequest) {
     }
 
     const providedApiKey = authHeader.replace('Bearer ', '');
-    console.log('Team API key:', providedApiKey);
 
     // Parse request body
     const requestData = await request.json();
-    console.log('Request data:', requestData);
 
     // Validate required fields
     if (!requestData.id) {
@@ -51,17 +45,14 @@ export async function POST(request: NextRequest) {
 
     try {
       // Find team by API key
-      console.log('Querying teams collection...');
       const teamsQuery = query(
         collection(db, 'teams'),
         where('apiKey', '==', providedApiKey)
       );
       
       const teamsSnapshot = await getDocs(teamsQuery);
-      console.log('Teams query result:', teamsSnapshot.size, 'teams found');
       
       if (teamsSnapshot.empty) {
-        console.log('No team found with provided API key');
         return NextResponse.json(
           { 
             success: false,
@@ -75,17 +66,13 @@ export async function POST(request: NextRequest) {
       const teamId = teamDoc.id;
       const teamData = teamDoc.data();
       const teamName = teamData.name;
-      console.log('Found team:', teamId, 'name:', teamName);
 
       // Find transaction by document ID
-      console.log('Finding transaction with document ID:', requestData.id);
-      
       try {
         const transactionDocRef = doc(db, 'transactions', requestData.id);
         const transactionDoc = await getDoc(transactionDocRef);
         
         if (!transactionDoc.exists()) {
-          console.log('No transaction found with document ID:', requestData.id);
           return NextResponse.json(
             { 
               success: false,
@@ -99,7 +86,6 @@ export async function POST(request: NextRequest) {
         
         // Check if transaction belongs to the authenticated team
         if (transactionData.teamId !== teamId) {
-          console.log('Transaction does not belong to team:', { transactionTeam: transactionData.teamId, authTeam: teamId });
           return NextResponse.json(
             { 
               success: false,
@@ -127,7 +113,6 @@ export async function POST(request: NextRequest) {
       
       // Check if transaction is in a state that can be updated
       if (!['กำลังโอน', 'รอโอน'].includes(transactionData.status)) {
-        console.log('Transaction cannot be updated, current status:', transactionData.status);
         return NextResponse.json(
           { 
             success: false,
@@ -144,8 +129,6 @@ export async function POST(request: NextRequest) {
       let currentWebsiteBalance = 0;
       
       if (requestData.status === 'ล้มเหลว' && transactionData.type === 'withdraw') {
-        console.log('Processing credit refund for failed withdrawal...');
-        
         if (transactionData.websiteId && transactionData.amount) {
           try {
             // Get website document
@@ -160,14 +143,6 @@ export async function POST(request: NextRequest) {
               websiteName = websiteData.name || 'Unknown Website';
               currentWebsiteBalance = newBalance; // Store the new balance after refund
               
-              console.log('Refunding credit:', {
-                websiteId: transactionData.websiteId,
-                websiteName: websiteName,
-                currentBalance: currentBalance,
-                refundAmount: refundAmount,
-                newBalance: newBalance
-              });
-              
               // Update website balance
               await updateDoc(websiteDocRef, {
                 balance: newBalance,
@@ -175,9 +150,6 @@ export async function POST(request: NextRequest) {
               });
               
               websiteUpdated = true;
-              console.log('Credit refunded successfully');
-            } else {
-              console.log('Website not found for refund:', transactionData.websiteId);
             }
           } catch (refundError) {
             console.error('Error processing credit refund:', refundError);
@@ -204,14 +176,12 @@ export async function POST(request: NextRequest) {
               websiteName = websiteData.name || 'Unknown Website';
             }
           } catch (balanceError) {
-            console.error('Error getting website balance:', balanceError);
-            // Continue without balance info
+            // Continue without balance info - silent fail
           }
         }
       }
 
       // Update transaction status
-      console.log('Updating transaction status to:', requestData.status);
       const updateData: any = {
         status: requestData.status,
         updatedAt: serverTimestamp()
@@ -255,13 +225,11 @@ export async function POST(request: NextRequest) {
           message: `Credit refunded: ${refundAmount} THB`
         };
       }
-
-      console.log('Transaction updated successfully:', response);
       
       return NextResponse.json(response);
 
     } catch (dbError) {
-      console.error('Database query error:', dbError);
+      console.error('Database error:', dbError);
       return NextResponse.json(
         { 
           success: false,
@@ -273,7 +241,7 @@ export async function POST(request: NextRequest) {
     }
 
   } catch (error) {
-    console.error('Error updating transaction:', error);
+    console.error('Server error:', error);
     return NextResponse.json(
       { 
         success: false,

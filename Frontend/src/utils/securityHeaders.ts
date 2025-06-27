@@ -465,9 +465,7 @@ export class SecurityMonitor {
         }
         break;
       default:
-        if (config.app.isDevelopment) {
-          console.log(logMessage, logData);
-        }
+        // Development logging removed
     }
   }
 

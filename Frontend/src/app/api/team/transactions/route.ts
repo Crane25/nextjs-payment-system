@@ -15,14 +15,10 @@ interface TransactionRequest {
 
 export async function POST(request: NextRequest) {
   try {
-    console.log('API called: /api/team/transactions');
-    
     // Get API key from Authorization header
     const authHeader = request.headers.get('Authorization');
-    console.log('Authorization header:', authHeader ? 'Present' : 'Missing');
     
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      console.log('Invalid authorization header format');
       return NextResponse.json(
         { 
           success: false,
@@ -33,15 +29,12 @@ export async function POST(request: NextRequest) {
     }
 
     const teamApiKey = authHeader.replace('Bearer ', '');
-    console.log('Team API key:', teamApiKey);
 
     // Parse request body
     let requestData: TransactionRequest;
     try {
       requestData = await request.json();
-      console.log('Request data:', requestData);
     } catch (parseError) {
-      console.log('Invalid JSON in request body');
       return NextResponse.json(
         { 
           success: false,
@@ -78,7 +71,6 @@ export async function POST(request: NextRequest) {
     );
 
     if (missingFields.length > 0) {
-      console.log('Missing required fields:', missingFields);
       return NextResponse.json(
         { 
           success: false,
@@ -92,7 +84,6 @@ export async function POST(request: NextRequest) {
 
     // Validate amount is a positive number
     if (typeof requestData.amount !== 'number' || requestData.amount <= 0) {
-      console.log('Invalid amount:', requestData.amount);
       return NextResponse.json(
         { 
           success: false,
@@ -104,17 +95,14 @@ export async function POST(request: NextRequest) {
 
     try {
       // Find team by API key
-      console.log('Querying teams collection...');
       const teamsQuery = query(
         collection(db, 'teams'),
         where('apiKey', '==', teamApiKey)
       );
       
       const teamsSnapshot = await getDocs(teamsQuery);
-      console.log('Teams query result:', teamsSnapshot.size, 'teams found');
       
       if (teamsSnapshot.empty) {
-        console.log('No team found with provided API key');
         return NextResponse.json(
           { 
             success: false,
@@ -127,10 +115,8 @@ export async function POST(request: NextRequest) {
       const teamDoc = teamsSnapshot.docs[0];
       const apiTeamId = teamDoc.id;
       const teamName = teamDoc.data().name;
-      console.log('Found team:', apiTeamId, 'name:', teamName);
 
       // Check if combination of customerUsername + transactionId already exists
-      console.log('Checking for duplicate customerUsername + transactionId combination...');
       const existingTransactionQuery = query(
         collection(db, 'transactions'),
         where('customerUsername', '==', requestData.customerUsername),
@@ -140,10 +126,6 @@ export async function POST(request: NextRequest) {
       const existingTransactionSnapshot = await getDocs(existingTransactionQuery);
       
       if (!existingTransactionSnapshot.empty) {
-        console.log('Transaction with same customerUsername and transactionId already exists:', {
-          customerUsername: requestData.customerUsername,
-          transactionId: requestData.transactionId
-        });
         return NextResponse.json(
           { 
             success: false,
@@ -160,7 +142,6 @@ export async function POST(request: NextRequest) {
 
       if (requestData.websiteId) {
         // Use websiteId directly
-        console.log('Using websiteId:', requestData.websiteId);
         websiteId = requestData.websiteId;
         
         // Get website document by ID
@@ -168,7 +149,6 @@ export async function POST(request: NextRequest) {
         const websiteDoc = await getDoc(websiteDocRef);
         
         if (!websiteDoc.exists()) {
-          console.log('Website not found by ID:', websiteId);
           return NextResponse.json(
             { 
               success: false,
@@ -182,7 +162,6 @@ export async function POST(request: NextRequest) {
         
         // Check if website belongs to the authenticated team
         if (websiteData.teamId !== apiTeamId) {
-          console.log('Website does not belong to team:', { websiteTeam: websiteData.teamId, authTeam: apiTeamId });
           return NextResponse.json(
             { 
               success: false,
@@ -197,7 +176,6 @@ export async function POST(request: NextRequest) {
 
       } else {
         // Use websiteName (legacy method)
-        console.log('Using websiteName:', requestData.websiteName);
         const websitesQuery = query(
           collection(db, 'websites'),
           where('name', '==', requestData.websiteName),
@@ -207,7 +185,6 @@ export async function POST(request: NextRequest) {
         const websitesSnapshot = await getDocs(websitesQuery);
         
         if (websitesSnapshot.empty) {
-          console.log('Website not found:', requestData.websiteName);
           return NextResponse.json(
             { 
               success: false,
@@ -226,7 +203,6 @@ export async function POST(request: NextRequest) {
 
       // Check if website has sufficient balance
       if (currentBalance < requestData.amount) {
-        console.log('Insufficient balance:', { current: currentBalance, requested: requestData.amount });
         return NextResponse.json(
           { 
             success: false,
@@ -242,14 +218,12 @@ export async function POST(request: NextRequest) {
       const newBalance = currentBalance - requestData.amount;
 
       // Update website balance
-      console.log('Updating website balance...');
       await updateDoc(doc(db, 'websites', websiteId), {
         balance: newBalance,
         updatedAt: serverTimestamp()
       });
 
       // Create transaction document
-      console.log('Creating new withdrawal transaction...');
       const transactionData = {
         transactionId: requestData.transactionId,
         customerUsername: requestData.customerUsername,
@@ -271,7 +245,6 @@ export async function POST(request: NextRequest) {
       };
 
       const docRef = await addDoc(collection(db, 'transactions'), transactionData);
-      console.log('Withdrawal transaction created with ID:', docRef.id);
 
       return NextResponse.json({
         success: true,
@@ -324,7 +297,6 @@ export async function POST(request: NextRequest) {
 // GET method to retrieve transactions for a team
 export async function GET(request: NextRequest) {
   try {
-    console.log('API called: GET /api/team/transactions');
     
     // Get API key from Authorization header
     const authHeader = request.headers.get('Authorization');

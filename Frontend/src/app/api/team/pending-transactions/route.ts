@@ -4,14 +4,10 @@ import { db } from '@/lib/firebase';
 
 export async function GET(request: NextRequest) {
   try {
-    console.log('API called: /api/team/pending-transactions');
-    
     // Get API key from Authorization header
     const authHeader = request.headers.get('Authorization');
-    console.log('Authorization header:', authHeader ? 'Present' : 'Missing');
     
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      console.log('Invalid authorization header format');
       return NextResponse.json(
         { 
           success: false,
@@ -22,21 +18,17 @@ export async function GET(request: NextRequest) {
     }
 
     const providedApiKey = authHeader.replace('Bearer ', '');
-    console.log('Team API key:', providedApiKey);
 
     try {
       // Find team by API key
-      console.log('Querying teams collection...');
       const teamsQuery = query(
         collection(db, 'teams'),
         where('apiKey', '==', providedApiKey)
       );
       
       const teamsSnapshot = await getDocs(teamsQuery);
-      console.log('Teams query result:', teamsSnapshot.size, 'teams found');
       
       if (teamsSnapshot.empty) {
-        console.log('No team found with provided API key');
         return NextResponse.json(
           { 
             success: false,
@@ -52,24 +44,20 @@ export async function GET(request: NextRequest) {
       const teamName = teamData.name;
       const teamUrl = teamData.url || '';
       const teamApiKey = teamData.apiKey || '';
-      console.log('Found team:', teamId, 'name:', teamName, 'url:', teamUrl);
       
-      // Get transactions for this team (using same pattern as working APIs)
-      console.log('Querying transactions for team:', teamId);
+      // Get transactions for this team
       const transactionsQuery = query(
         collection(db, 'transactions'),
         where('teamId', '==', teamId)
       );
       
       const transactionsSnapshot = await getDocs(transactionsQuery);
-      console.log('Transactions query result:', transactionsSnapshot.size, 'transactions found');
       
-      // Filter for pending transactions on client side (same as websites API pattern)
+      // Filter for pending transactions on client side
       const pendingTransactions = transactionsSnapshot.docs
         .filter(doc => {
           const data = doc.data();
           const status = data.status;
-          console.log('Checking transaction:', data.transactionId, 'status:', status);
           return status === 'รอโอน';
         })
         .map(doc => ({
@@ -77,11 +65,8 @@ export async function GET(request: NextRequest) {
           data: doc.data(),
           createdAt: doc.data().createdAt?.toDate?.() || new Date(doc.data().createdAt)
         }));
-
-      console.log('Pending transactions found:', pendingTransactions.length);
       
       if (pendingTransactions.length === 0) {
-        console.log('No pending transactions found');
         return NextResponse.json({
           success: true,
           teamId: teamId,
@@ -106,8 +91,6 @@ export async function GET(request: NextRequest) {
       
       if (transactionData.websiteId) {
         try {
-          console.log('Fetching website data for websiteId:', transactionData.websiteId);
-          
           // Method 1: Try to get website by document ID (most common case)
           try {
             const websiteDocRef = doc(db, 'websites', transactionData.websiteId);
@@ -117,10 +100,7 @@ export async function GET(request: NextRequest) {
               const websiteData = websiteDoc.data();
               websiteUrl = websiteData.url || '';
               websiteApiKey = websiteData.apiKey || '';
-              console.log('Found website by document ID - URL:', websiteUrl, 'API Key:', websiteApiKey ? 'Present' : 'Missing');
             } else {
-              console.log('Website document not found by ID:', transactionData.websiteId);
-              
               // Method 2: Fallback - search by websiteId field (legacy support)
               const websiteQuery = query(
                 collection(db, 'websites'),
@@ -132,9 +112,6 @@ export async function GET(request: NextRequest) {
                 const websiteData = websiteSnapshot.docs[0].data();
                 websiteUrl = websiteData.url || '';
                 websiteApiKey = websiteData.apiKey || '';
-                console.log('Found website by websiteId field - URL:', websiteUrl, 'API Key:', websiteApiKey ? 'Present' : 'Missing');
-              } else {
-                console.log('No website found with websiteId field:', transactionData.websiteId);
               }
             }
           } catch (docError) {
@@ -146,7 +123,6 @@ export async function GET(request: NextRequest) {
       }
 
       // Update status to "กำลังโอน"
-      console.log('Updating transaction status to "กำลังโอน" for transaction:', transactionDoc.id);
       await updateDoc(doc(db, 'transactions', transactionDoc.id), {
         status: 'กำลังโอน',
         updatedAt: serverTimestamp()
@@ -175,8 +151,6 @@ export async function GET(request: NextRequest) {
         lastModifiedByEmail: transactionData.lastModifiedByEmail || null,
         lastModifiedAt: transactionData.lastModifiedAt?.toDate?.()?.toISOString() || null
       };
-
-      console.log('Returning transaction with updated status:', transaction.transactionId);
       
       return NextResponse.json({
         success: true,
@@ -189,20 +163,19 @@ export async function GET(request: NextRequest) {
       });
 
     } catch (dbError) {
-      console.error('Database query error:', dbError);
+      console.error('Database error:', dbError);
       return NextResponse.json(
         { 
           success: false,
           error: 'Database connection failed',
-          details: dbError instanceof Error ? dbError.message : 'Unknown database error',
-          note: 'The API requires Firebase security rules to allow read access, or proper authentication setup'
+          details: dbError instanceof Error ? dbError.message : 'Unknown database error'
         },
         { status: 503 }
       );
     }
 
   } catch (error) {
-    console.error('Error fetching pending transactions:', error);
+    console.error('Server error:', error);
     return NextResponse.json(
       { 
         success: false,

@@ -164,7 +164,7 @@ export function logError(error: any, context?: string): void {
         console.warn('[MEDIUM ERROR]', logData);
         break;
       default:
-        console.log('[LOW ERROR]', logData);
+        // Low severity errors not logged in production
     }
   }
 }
