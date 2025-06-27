@@ -1,6 +1,6 @@
 # Pending Transactions API
 
-API สำหรับดึงรายการธุรกรรมที่มีสถานะ "รอโอน" ของทีม
+API สำหรับดึงธุรกรรมที่มีสถานะ "รอโอน" ทีละ 1 รายการ และอัปเดตสถานะเป็น "กำลังโอน" อัตโนมัติ
 
 ## Endpoint
 ```
@@ -21,37 +21,46 @@ Content-Type: application/json
 
 ## Response
 
-### Success Response (200)
+### Success Response (200) - Transaction Found
 ```json
 {
   "success": true,
   "teamId": "team_id_here",
   "teamName": "ชื่อทีม",
-  "pendingTransactionCount": 5,
-  "transactions": [
-    {
-      "id": "transaction_doc_id",
-      "transactionId": "TXN_123456",
-      "customerUsername": "user123",
-      "websiteName": "เว็บไซต์ A",
-      "websiteId": "website_id_here",
-      "bankName": "ธนาคารกรุงเทพ",
-      "accountNumber": "1234567890",
-      "realName": "นาย ทดสอบ ระบบ",
-      "amount": 1000,
-      "balanceBefore": 5000,
-      "balanceAfter": 4000,
-      "status": "รอโอน",
-      "type": "withdraw",
-      "note": null,
-      "createdAt": "2024-01-01T10:00:00.000Z",
-      "updatedAt": "2024-01-01T10:00:00.000Z",
-      "createdBy": "api",
-      "lastModifiedBy": null,
-      "lastModifiedByEmail": null,
-      "lastModifiedAt": null
-    }
-  ]
+  "message": "Transaction retrieved and status updated to \"กำลังโอน\"",
+  "transaction": {
+    "id": "transaction_doc_id",
+    "transactionId": "TXN_123456",
+    "customerUsername": "user123",
+    "websiteName": "เว็บไซต์ A",
+    "websiteId": "website_id_here",
+    "bankName": "ธนาคารกรุงเทพ",
+    "accountNumber": "1234567890",
+    "realName": "นาย ทดสอบ ระบบ",
+    "amount": 1000,
+    "balanceBefore": 5000,
+    "balanceAfter": 4000,
+    "status": "กำลังโอน",
+    "type": "withdraw",
+    "note": null,
+    "createdAt": "2024-01-01T10:00:00.000Z",
+    "updatedAt": "2024-01-01T10:05:00.000Z",
+    "createdBy": "api",
+    "lastModifiedBy": null,
+    "lastModifiedByEmail": null,
+    "lastModifiedAt": null
+  }
+}
+```
+
+### Success Response (200) - No Pending Transactions
+```json
+{
+  "success": true,
+  "teamId": "team_id_here",
+  "teamName": "ชื่อทีม",
+  "message": "No pending transactions found",
+  "transaction": null
 }
 ```
 
@@ -113,8 +122,13 @@ const response = await fetch('/api/team/pending-transactions', {
 const data = await response.json();
 
 if (data.success) {
-  console.log('Pending transactions:', data.transactions);
-  console.log('Total pending:', data.pendingTransactionCount);
+  if (data.transaction) {
+    console.log('Retrieved transaction:', data.transaction);
+    console.log('Transaction ID:', data.transaction.transactionId);
+    console.log('Status updated to:', data.transaction.status);
+  } else {
+    console.log('No pending transactions found');
+  }
 } else {
   console.error('Error:', data.error);
 }
@@ -139,12 +153,18 @@ curl_close($ch);
 $data = json_decode($response, true);
 
 if ($data['success']) {
-    echo "Pending transactions: " . $data['pendingTransactionCount'] . "\n";
-    foreach ($data['transactions'] as $transaction) {
+    if ($data['transaction']) {
+        $transaction = $data['transaction'];
+        echo "Retrieved transaction:\n";
         echo "Transaction ID: " . $transaction['transactionId'] . "\n";
         echo "Amount: " . $transaction['amount'] . "\n";
         echo "Customer: " . $transaction['customerUsername'] . "\n";
-        echo "---\n";
+        echo "Status: " . $transaction['status'] . "\n";
+        echo "Bank: " . $transaction['bankName'] . "\n";
+        echo "Account: " . $transaction['accountNumber'] . "\n";
+        echo "Real Name: " . $transaction['realName'] . "\n";
+    } else {
+        echo "No pending transactions found\n";
     }
 } else {
     echo "Error: " . $data['error'] . "\n";
@@ -154,14 +174,15 @@ if ($data['success']) {
 
 ## Features
 - ✅ ใช้ Team API Key ในการยืนยันตัวตน
-- ✅ กรองเฉพาะธุรกรรมที่สถานะ "รอโอน"
-- ✅ เรียงลำดับตามวันที่สร้าง (ใหม่สุดก่อน)
+- ✅ ดึงธุรกรรมทีละ 1 รายการ (FIFO - First In, First Out)
+- ✅ อัปเดตสถานะจาก "รอโอน" เป็น "กำลังโอน" อัตโนมัติ
 - ✅ รวมข้อมูลครบถ้วน รวมถึงหมายเหตุและผู้แก้ไขล่าสุด
 - ✅ Error handling ที่ครอบคลุม
 - ✅ Logging สำหรับ debugging
 
 ## Notes
 - API นี้จะคืนเฉพาะธุรกรรมที่เป็นของทีมที่ใช้ API Key
-- ธุรกรรมจะถูกเรียงลำดับตามวันที่สร้างจากใหม่สุดไปเก่าสุด
-- สถานะ "รอโอน" หมายถึงธุรกรรมที่รอการโอนเงิน
-- หากไม่มีธุรกรรมที่รอโอน จะคืน array ว่าง และ pendingTransactionCount = 0 
+- ดึงทีละ 1 รายการและอัปเดตสถานะทันที
+- สถานะจะเปลี่ยนจาก "รอโอน" → "กำลังโอน" 
+- หากไม่มีธุรกรรมที่รอโอน จะคืน transaction: null
+- เหมาะสำหรับระบบประมวลผลธุรกรรมแบบ queue 

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { collection, query, where, getDocs } from 'firebase/firestore';
+import { collection, query, where, getDocs, limit, updateDoc, doc, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 
 export async function GET(request: NextRequest) {
@@ -51,59 +51,91 @@ export async function GET(request: NextRequest) {
       const teamName = teamDoc.data().name;
       console.log('Found team:', teamId, 'name:', teamName);
       
-      // Get pending transactions (status = "รอโอน") for this team
-      console.log('Querying pending transactions for team:', teamId);
-      const pendingTransactionsQuery = query(
+      // Get transactions for this team (using same pattern as working APIs)
+      console.log('Querying transactions for team:', teamId);
+      const transactionsQuery = query(
         collection(db, 'transactions'),
-        where('teamId', '==', teamId),
-        where('status', '==', 'รอโอน')
+        where('teamId', '==', teamId)
       );
       
-      const pendingTransactionsSnapshot = await getDocs(pendingTransactionsQuery);
-      console.log('Pending transactions query result:', pendingTransactionsSnapshot.size, 'transactions found');
+      const transactionsSnapshot = await getDocs(transactionsQuery);
+      console.log('Transactions query result:', transactionsSnapshot.size, 'transactions found');
       
-      // Format transaction data
-      const pendingTransactions = pendingTransactionsSnapshot.docs.map(doc => {
-        const data = doc.data();
-        return {
-          id: doc.id,
-          transactionId: data.transactionId || '',
-          customerUsername: data.customerUsername || '',
-          websiteName: data.websiteName || '',
-          websiteId: data.websiteId || '',
-          bankName: data.bankName || '',
-          accountNumber: data.accountNumber || '',
-          realName: data.realName || '',
-          amount: data.amount || 0,
-          balanceBefore: data.balanceBefore || 0,
-          balanceAfter: data.balanceAfter || 0,
-          status: data.status || '',
-          type: data.type || '',
-          note: data.note || null,
-          createdAt: data.createdAt?.toDate?.()?.toISOString() || null,
-          updatedAt: data.updatedAt?.toDate?.()?.toISOString() || null,
-          createdBy: data.createdBy || '',
-          lastModifiedBy: data.lastModifiedBy || null,
-          lastModifiedByEmail: data.lastModifiedByEmail || null,
-          lastModifiedAt: data.lastModifiedAt?.toDate?.()?.toISOString() || null
-        };
-      });
+      // Filter for pending transactions on client side (same as websites API pattern)
+      const pendingTransactions = transactionsSnapshot.docs
+        .filter(doc => {
+          const data = doc.data();
+          const status = data.status;
+          console.log('Checking transaction:', data.transactionId, 'status:', status);
+          return status === 'รอโอน';
+        })
+        .map(doc => ({
+          doc: doc,
+          data: doc.data(),
+          createdAt: doc.data().createdAt?.toDate?.() || new Date(doc.data().createdAt)
+        }));
 
-      // Sort by creation date (newest first)
+      console.log('Pending transactions found:', pendingTransactions.length);
+      
+      if (pendingTransactions.length === 0) {
+        console.log('No pending transactions found');
+        return NextResponse.json({
+          success: true,
+          teamId: teamId,
+          teamName: teamName,
+          message: 'No pending transactions found',
+          transaction: null
+        });
+      }
+
+      // Sort by creation date (oldest first for FIFO)
       pendingTransactions.sort((a, b) => {
-        const dateA = new Date(a.createdAt || 0);
-        const dateB = new Date(b.createdAt || 0);
-        return dateB.getTime() - dateA.getTime();
+        return a.createdAt.getTime() - b.createdAt.getTime();
       });
 
-      console.log('Returning response with', pendingTransactions.length, 'pending transactions');
+      // Get the first (oldest) pending transaction
+      const transactionDoc = pendingTransactions[0].doc;
+      const transactionData = pendingTransactions[0].data;
+      
+      // Update status to "กำลังโอน"
+      console.log('Updating transaction status to "กำลังโอน" for transaction:', transactionDoc.id);
+      await updateDoc(doc(db, 'transactions', transactionDoc.id), {
+        status: 'กำลังโอน',
+        updatedAt: serverTimestamp()
+      });
+
+      // Format transaction data with updated status
+      const transaction = {
+        id: transactionDoc.id,
+        transactionId: transactionData.transactionId || '',
+        customerUsername: transactionData.customerUsername || '',
+        websiteName: transactionData.websiteName || '',
+        websiteId: transactionData.websiteId || '',
+        bankName: transactionData.bankName || '',
+        accountNumber: transactionData.accountNumber || '',
+        realName: transactionData.realName || '',
+        amount: transactionData.amount || 0,
+        balanceBefore: transactionData.balanceBefore || 0,
+        balanceAfter: transactionData.balanceAfter || 0,
+        status: 'กำลังโอน', // Updated status
+        type: transactionData.type || '',
+        note: transactionData.note || null,
+        createdAt: transactionData.createdAt?.toDate?.()?.toISOString() || null,
+        updatedAt: new Date().toISOString(), // Current timestamp
+        createdBy: transactionData.createdBy || '',
+        lastModifiedBy: transactionData.lastModifiedBy || null,
+        lastModifiedByEmail: transactionData.lastModifiedByEmail || null,
+        lastModifiedAt: transactionData.lastModifiedAt?.toDate?.()?.toISOString() || null
+      };
+
+      console.log('Returning transaction with updated status:', transaction.transactionId);
       
       return NextResponse.json({
         success: true,
         teamId: teamId,
         teamName: teamName,
-        pendingTransactionCount: pendingTransactions.length,
-        transactions: pendingTransactions
+        message: 'Transaction retrieved and status updated to "กำลังโอน"',
+        transaction: transaction
       });
 
     } catch (dbError) {
