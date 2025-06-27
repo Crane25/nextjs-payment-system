@@ -42,6 +42,9 @@ interface BotTransaction {
   updatedAt: any;
   createdBy: string;
   note?: string;
+  lastModifiedBy?: string;
+  lastModifiedByEmail?: string;
+  lastModifiedAt?: any;
 }
 
 const statusOptions = [
@@ -61,7 +64,7 @@ const statusColors: { [key: string]: string } = {
 export default function BotTransactionsPage() {
   const { user } = useAuth();
   const { userProfile } = useUserProfile();
-  const { hasPermission } = usePermission();
+  const { hasPermission, isUser } = usePermission();
   const { teams, loading: teamsLoading, error: teamsError } = useMultiTeam();
   
   // Debug teams data
@@ -300,25 +303,35 @@ export default function BotTransactionsPage() {
     try {
       setUpdatingStatus(transactionId);
 
-      const updateData: any = {
-        status: newStatus,
-        updatedAt: new Date()
-      };
+              const updateData: any = {
+          status: newStatus,
+          updatedAt: new Date(),
+          lastModifiedBy: userProfile?.displayName || user?.displayName || 'ไม่ระบุผู้ใช้',
+          lastModifiedByEmail: user?.email || '',
+          lastModifiedAt: new Date()
+        };
 
-      if (note !== undefined) {
-        updateData.note = note;
-      }
+        if (note !== undefined) {
+          updateData.note = note;
+        }
 
-      await updateDoc(doc(db, 'transactions', transactionId), updateData);
+        await updateDoc(doc(db, 'transactions', transactionId), updateData);
 
-      // Update local state
-      setTransactions(prev => 
-        prev.map(transaction => 
-          transaction.id === transactionId 
-            ? { ...transaction, status: newStatus, note: note || transaction.note }
-            : transaction
-        )
-      );
+        // Update local state
+        setTransactions(prev => 
+          prev.map(transaction => 
+            transaction.id === transactionId 
+              ? { 
+                  ...transaction, 
+                  status: newStatus, 
+                  note: note || transaction.note,
+                  lastModifiedBy: updateData.lastModifiedBy,
+                  lastModifiedByEmail: updateData.lastModifiedByEmail,
+                  lastModifiedAt: updateData.lastModifiedAt
+                }
+              : transaction
+          )
+        );
 
       toast.success('อัพเดทข้อมูลสำเร็จ');
       closeManageModal();
@@ -764,31 +777,79 @@ export default function BotTransactionsPage() {
                             {transaction.note ? (
                               <div className="max-w-xs">
                                 <div className="flex items-start space-x-2">
-                                  <svg className="h-4 w-4 text-blue-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                                  </svg>
-                                  <div className="text-sm text-gray-700 dark:text-gray-300 break-words">
-                                    {transaction.note.length > 50 ? (
-                                      <div className="relative group">
-                                        <span className="cursor-help">
-                                          {transaction.note.substring(0, 50)}...
-                                        </span>
-                                        <div className="absolute bottom-full left-0 mb-2 px-3 py-2 bg-gray-900 dark:bg-gray-700 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-normal max-w-sm z-20 shadow-lg">
-                                          <div className="font-medium mb-1">หมายเหตุเต็ม:</div>
+                                  <div className="relative group h-4 w-4 mt-0.5 flex-shrink-0 bg-red-500 rounded-full flex items-center justify-center cursor-help">
+                                    <span className="text-white text-xs font-bold">!</span>
+                                    <div className="absolute bottom-full left-0 mb-2 px-3 py-2 bg-gray-900 dark:bg-gray-700 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-normal max-w-sm z-20 shadow-lg">
+                                      <div className="space-y-2">
+                                        <div>
+                                          <div className="font-medium text-yellow-300">หมายเหตุ:</div>
                                           <div className="text-gray-200 dark:text-gray-300">
                                             {transaction.note}
                                           </div>
-                                          <div className="absolute top-full left-4 border-4 border-transparent border-t-gray-900 dark:border-t-gray-700"></div>
                                         </div>
+                                        {transaction.lastModifiedBy && (
+                                          <div className="border-t border-gray-600 pt-2">
+                                            <div className="font-medium text-blue-300">แก้ไขล่าสุดโดย:</div>
+                                            <div className="text-gray-200">
+                                              {transaction.lastModifiedBy}
+                                            </div>
+                                            {transaction.lastModifiedByEmail && (
+                                              <div className="text-gray-400 text-xs">
+                                                ({transaction.lastModifiedByEmail})
+                                              </div>
+                                            )}
+                                            {transaction.lastModifiedAt && (
+                                              <div className="text-gray-400 text-xs mt-1">
+                                                {formatDate(transaction.lastModifiedAt)}
+                                              </div>
+                                            )}
+                                          </div>
+                                        )}
                                       </div>
-                                    ) : (
-                                      transaction.note
-                                    )}
+                                      <div className="absolute top-full left-4 border-4 border-transparent border-t-gray-900 dark:border-t-gray-700"></div>
+                                    </div>
+                                  </div>
+                                  <div className="text-sm text-gray-700 dark:text-gray-300 break-words">
+                                    {transaction.note.length > 50 ? `${transaction.note.substring(0, 50)}...` : transaction.note}
                                   </div>
                                 </div>
                               </div>
                             ) : (
-                              <span className="text-gray-400 dark:text-gray-500 text-sm italic">-</span>
+                              <div className="max-w-xs">
+                                <div className="flex items-start space-x-2">
+                                  {transaction.lastModifiedBy ? (
+                                    <div className="relative group h-4 w-4 mt-0.5 flex-shrink-0 bg-red-500 rounded-full flex items-center justify-center cursor-help">
+                                      <span className="text-white text-xs font-bold">!</span>
+                                      <div className="absolute bottom-full left-0 mb-2 px-3 py-2 bg-gray-900 dark:bg-gray-700 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-normal max-w-sm z-20 shadow-lg">
+                                        <div className="space-y-2">
+                                          <div>
+                                            <div className="font-medium text-yellow-300">หมายเหตุ:</div>
+                                            <div className="text-gray-400 italic">ไม่มีหมายเหตุ</div>
+                                          </div>
+                                          <div className="border-t border-gray-600 pt-2">
+                                            <div className="font-medium text-blue-300">แก้ไขล่าสุดโดย:</div>
+                                            <div className="text-gray-200">
+                                              {transaction.lastModifiedBy}
+                                            </div>
+                                            {transaction.lastModifiedByEmail && (
+                                              <div className="text-gray-400 text-xs">
+                                                ({transaction.lastModifiedByEmail})
+                                              </div>
+                                            )}
+                                            {transaction.lastModifiedAt && (
+                                              <div className="text-gray-400 text-xs mt-1">
+                                                {formatDate(transaction.lastModifiedAt)}
+                                              </div>
+                                            )}
+                                          </div>
+                                        </div>
+                                        <div className="absolute top-full left-4 border-4 border-transparent border-t-gray-900 dark:border-t-gray-700"></div>
+                                      </div>
+                                    </div>
+                                  ) : null}
+                                  <span className="text-gray-400 dark:text-gray-500 text-sm italic">-</span>
+                                </div>
+                              </div>
                             )}
                           </td>
                           <td className="py-4 px-4 text-center">
@@ -798,6 +859,13 @@ export default function BotTransactionsPage() {
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                                 </svg>
                                 ปิดแล้ว
+                              </span>
+                            ) : isUser() ? (
+                              <span className="inline-flex items-center px-3 py-1.5 text-xs font-medium text-gray-400 dark:text-gray-500 bg-gray-100 dark:bg-gray-700 rounded-lg">
+                                <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728L5.636 5.636m12.728 12.728L18.364 5.636M5.636 18.364l12.728-12.728" />
+                                </svg>
+                                ไม่มีสิทธิ์
                               </span>
                             ) : (
                               <button
