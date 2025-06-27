@@ -1009,22 +1009,7 @@ export default function TopupHistory() {
             </div>
           </div>
 
-          {/* Table Header */}
-          <div className="border-b border-gray-200 dark:border-gray-700 pb-3 mb-3">
-            <div className={`grid gap-4 px-4 py-3 text-sm font-semibold text-gray-900 dark:text-white ${teams.length > 1 ? 'grid-cols-9' : 'grid-cols-8'}`}>
-              <div>วันที่/เวลา</div>
-              <div>เว็บไซต์</div>
-              {teams.length > 1 && <div>ทีม</div>}
-              <div>ผู้เติมเงิน</div>
-              <div className="text-center">จำนวนเติม</div>
-              <div className="text-center">ยอดก่อนเติม</div>
-              <div className="text-center">ยอดหลังเติม</div>
-              <div>หมายเหตุ</div>
-              <div className="text-center">สถานะ</div>
-            </div>
-          </div>
-
-                    {/* Table */}
+          {/* Table */}
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
