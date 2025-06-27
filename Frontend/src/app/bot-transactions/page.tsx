@@ -53,13 +53,55 @@ const statusOptions = [
   'ยกเลิก'
 ];
 
-const statusColors: { [key: string]: string } = {
-  'รอโอน': 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300',
-  'กำลังโอน': 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300',
-  'สำเร็จ': 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300',
-  'ยกเลิก': 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300',
-  'ล้มเหลว': 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300'
+// Enhanced status configuration with better organization
+const statusConfig: { [key: string]: {
+  label: string;
+  color: string;
+  icon: string;
+  priority: number;
+  group: string;
+} } = {
+  'รอโอน': {
+    label: 'รอโอน',
+    color: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300',
+    icon: '⏳',
+    priority: 1,
+    group: 'pending'
+  },
+  'กำลังโอน': {
+    label: 'กำลังโอน',
+    color: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
+    icon: '🔄',
+    priority: 2,
+    group: 'processing'
+  },
+  'สำเร็จ': {
+    label: 'สำเร็จ',
+    color: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300',
+    icon: '✅',
+    priority: 3,
+    group: 'completed'
+  },
+  'ยกเลิก': {
+    label: 'ยกเลิก',
+    color: 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300',
+    icon: '❌',
+    priority: 4,
+    group: 'cancelled'
+  },
+  'ล้มเหลว': {
+    label: 'ล้มเหลว',
+    color: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300',
+    icon: '⚠️',
+    priority: 5,
+    group: 'failed'
+  }
 };
+
+// Legacy status colors for backward compatibility
+const statusColors: { [key: string]: string } = Object.fromEntries(
+  Object.entries(statusConfig).map(([key, config]) => [key, config.color])
+);
 
 export default function BotTransactionsPage() {
   const { user } = useAuth();
@@ -516,9 +558,9 @@ export default function BotTransactionsPage() {
     return bankMapping[bankCode.toLowerCase()] || bankCode;
   };
 
-  // Filter transactions for display (client-side filtering for search/status)
+  // Filter and sort transactions for display (client-side filtering for search/status)
   const getFilteredTransactions = () => {
-    return transactions.filter(transaction => {
+    let filtered = transactions.filter(transaction => {
       // Search filter
       const searchLower = searchTerm.toLowerCase();
       const matchesSearch = !searchTerm || 
@@ -537,6 +579,15 @@ export default function BotTransactionsPage() {
 
       return matchesSearch && matchesStatus && matchesTeam;
     });
+
+    // Sort by date only (newest first) - back to original sorting
+    filtered.sort((a, b) => {
+      const aTime = a.createdAt?.toDate?.() || new Date(a.createdAt);
+      const bTime = b.createdAt?.toDate?.() || new Date(b.createdAt);
+      return bTime.getTime() - aTime.getTime();
+    });
+
+    return filtered;
   };
 
   const filteredTransactions = getFilteredTransactions();
@@ -583,59 +634,80 @@ export default function BotTransactionsPage() {
     >
       <div className="space-y-6 lg:space-y-8">
 
-        {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-          <div className="bg-gradient-to-r from-blue-500 to-cyan-600 rounded-2xl p-6 text-white">
+        {/* Enhanced Stats Cards with Status Groups */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
+          {/* Pending Status */}
+          <div className="bg-gradient-to-r from-yellow-500 to-orange-500 rounded-2xl p-5 text-white">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-blue-100 text-sm font-medium">รายการทั้งหมด</p>
-                <p className="text-2xl font-bold">{transactions.length}</p>
-              </div>
-              <svg className="h-8 w-8 text-blue-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-              </svg>
-            </div>
-          </div>
-
-          <div className="bg-gradient-to-r from-orange-500 to-red-600 rounded-2xl p-6 text-white">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-orange-100 text-sm font-medium">รอดำเนินการ</p>
+                <div className="flex items-center gap-1 mb-1">
+                  <span className="text-lg">⏳</span>
+                  <p className="text-yellow-100 text-sm font-medium">รอโอน</p>
+                </div>
                 <p className="text-2xl font-bold">
                   {transactions.filter(t => t.status === 'รอโอน').length}
                 </p>
               </div>
-              <svg className="h-8 w-8 text-orange-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
             </div>
           </div>
 
-          <div className="bg-gradient-to-r from-green-500 to-emerald-600 rounded-2xl p-6 text-white">
+          {/* Processing Status */}
+          <div className="bg-gradient-to-r from-blue-500 to-cyan-500 rounded-2xl p-5 text-white">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-green-100 text-sm font-medium">สำเร็จ</p>
+                <div className="flex items-center gap-1 mb-1">
+                  <span className="text-lg">🔄</span>
+                  <p className="text-blue-100 text-sm font-medium">กำลังโอน</p>
+                </div>
+                <p className="text-2xl font-bold">
+                  {transactions.filter(t => t.status === 'กำลังโอน').length}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Success Status */}
+          <div className="bg-gradient-to-r from-green-500 to-emerald-500 rounded-2xl p-5 text-white">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="flex items-center gap-1 mb-1">
+                  <span className="text-lg">✅</span>
+                  <p className="text-green-100 text-sm font-medium">สำเร็จ</p>
+                </div>
                 <p className="text-2xl font-bold">
                   {transactions.filter(t => t.status === 'สำเร็จ').length}
                 </p>
               </div>
-              <svg className="h-8 w-8 text-green-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
             </div>
           </div>
 
-          <div className="bg-gradient-to-r from-purple-500 to-indigo-600 rounded-2xl p-6 text-white">
+          {/* Failed/Cancelled Status */}
+          <div className="bg-gradient-to-r from-gray-500 to-gray-600 rounded-2xl p-5 text-white">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-purple-100 text-sm font-medium">ยอดรวม</p>
+                <div className="flex items-center gap-1 mb-1">
+                  <span className="text-lg">❌</span>
+                  <p className="text-gray-100 text-sm font-medium">ยกเลิก/ล้มเหลว</p>
+                </div>
                 <p className="text-2xl font-bold">
+                  {transactions.filter(t => ['ยกเลิก', 'ล้มเหลว'].includes(t.status)).length}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Total */}
+          <div className="bg-gradient-to-r from-purple-500 to-indigo-600 rounded-2xl p-5 text-white">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="flex items-center gap-1 mb-1">
+                  <span className="text-lg">💰</span>
+                  <p className="text-purple-100 text-sm font-medium">ยอดรวม</p>
+                </div>
+                <p className="text-xl font-bold">
                   ฿{formatAmount(transactions.reduce((sum, t) => sum + t.amount, 0))}
                 </p>
               </div>
-              <svg className="h-8 w-8 text-purple-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1" />
-              </svg>
             </div>
           </div>
         </div>
@@ -699,7 +771,7 @@ export default function BotTransactionsPage() {
                 </div>
               )}
 
-              {/* Status Filter */}
+              {/* Status Filter with organized groups */}
               <div className="flex items-center space-x-2">
                 <label className="text-sm font-medium text-gray-700 dark:text-gray-300 whitespace-nowrap">
                   สถานะ:
@@ -710,24 +782,34 @@ export default function BotTransactionsPage() {
                   className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                 >
                   <option value="all">สถานะทั้งหมด</option>
-                  {statusOptions.map(status => (
-                    <option key={status} value={status}>
-                      {status}
-                    </option>
-                  ))}
+                  <optgroup label="🔄 รอดำเนินการ">
+                    <option value="รอโอน">⏳ รอโอน ({transactions.filter(t => t.status === 'รอโอน').length})</option>
+                    <option value="กำลังโอน">🔄 กำลังโอน ({transactions.filter(t => t.status === 'กำลังโอน').length})</option>
+                  </optgroup>
+                  <optgroup label="✅ เสร็จสิ้น">
+                    <option value="สำเร็จ">✅ สำเร็จ ({transactions.filter(t => t.status === 'สำเร็จ').length})</option>
+                  </optgroup>
+                  <optgroup label="❌ ยกเลิก/ล้มเหลว">
+                    <option value="ยกเลิก">❌ ยกเลิก ({transactions.filter(t => t.status === 'ยกเลิก').length})</option>
+                    <option value="ล้มเหลว">⚠️ ล้มเหลว ({transactions.filter(t => t.status === 'ล้มเหลว').length})</option>
+                  </optgroup>
                 </select>
               </div>
 
-              {/* Clear Filters */}
+              {/* Enhanced Clear Filters Button */}
               {(searchTerm || statusFilter !== 'all' || selectedTeamFilter !== 'all') && (
                 <button
                   onClick={() => {
                     setSearchTerm('');
                     setStatusFilter('all');
                     setSelectedTeamFilter('all');
+                    setCurrentPage(1);
                   }}
-                  className="px-3 py-2 text-sm text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 bg-red-50 hover:bg-red-100 dark:bg-red-900/20 dark:hover:bg-red-900/30 rounded-lg transition-colors"
+                  className="flex items-center gap-2 px-4 py-2 text-sm bg-red-50 hover:bg-red-100 dark:bg-red-900/20 dark:hover:bg-red-900/40 text-red-600 dark:text-red-400 rounded-lg transition-colors"
                 >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
                   ล้างตัวกรอง
                 </button>
               )}
@@ -820,15 +902,14 @@ export default function BotTransactionsPage() {
                       <th className="text-left py-3 px-4 font-semibold text-gray-900 dark:text-white">เลขบัญชี</th>
                       <th className="text-left py-3 px-4 font-semibold text-gray-900 dark:text-white">ชื่อจริง</th>
                       <th className="text-center py-3 px-4 font-semibold text-gray-900 dark:text-white">จำนวนเงิน</th>
-                      <th className="text-center py-3 px-4 font-semibold text-gray-900 dark:text-white">สถานะ</th>
-                      <th className="text-left py-3 px-4 font-semibold text-gray-900 dark:text-white">หมายเหตุ</th>
+                      <th className="text-left py-3 px-4 font-semibold text-gray-900 dark:text-white">สถานะ</th>
                       <th className="text-center py-3 px-4 font-semibold text-gray-900 dark:text-white">การจัดการ</th>
                     </tr>
                   </thead>
                   <tbody>
                     {loading && transactions.length === 0 ? (
                       <tr>
-                        <td colSpan={11} className="py-16 text-center">
+                        <td colSpan={10} className="py-16 text-center">
                           <div className="flex items-center justify-center">
                             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
                             <span className="ml-2 text-gray-500 dark:text-gray-400">กำลังโหลดข้อมูลธุรกรรม...</span>
@@ -837,7 +918,7 @@ export default function BotTransactionsPage() {
                       </tr>
                     ) : teams.length === 0 && !teamsLoading ? (
                       <tr>
-                        <td colSpan={11} className="py-16 text-center">
+                        <td colSpan={10} className="py-16 text-center">
                           <div className="text-gray-500 dark:text-gray-400">
                             <svg className="h-12 w-12 mx-auto mb-2 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 715.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
@@ -849,7 +930,7 @@ export default function BotTransactionsPage() {
                       </tr>
                     ) : filteredTransactions.length === 0 ? (
                       <tr>
-                        <td colSpan={11} className="py-16 text-center">
+                        <td colSpan={10} className="py-16 text-center">
                           <div className="text-gray-500 dark:text-gray-400">
                             <svg className="h-12 w-12 mx-auto mb-2 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
@@ -902,91 +983,56 @@ export default function BotTransactionsPage() {
                               -฿{formatAmount(transaction.amount)}
                             </div>
                           </td>
-                          <td className="py-4 px-4 text-center">
-                            <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${statusColors[transaction.status] || 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300'}`}>
-                              {transaction.status}
-                            </span>
-                          </td>
-                          <td className="py-4 px-4">
-                            {transaction.note ? (
-                              <div className="max-w-xs">
-                                <div className="flex items-start space-x-2">
-                                  <div className="relative group h-4 w-4 mt-0.5 flex-shrink-0 bg-red-500 rounded-full flex items-center justify-center cursor-help">
-                                    <span className="text-white text-xs font-bold">!</span>
-                                    {/* Tooltip positioned left for first 3 rows, above for others */}
-                                    <div className={`absolute ${index < 3 ? 'right-full top-0 mr-2' : 'bottom-full right-0 mb-2'} px-3 py-2 bg-gray-900 dark:bg-gray-700 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-pre-wrap max-w-sm z-20 shadow-lg`}>
-                                      <div className="space-y-2">
-                                        <div>
-                                          <div className="font-medium text-yellow-300">หมายเหตุ:</div>
-                                          <div className="text-gray-200 dark:text-gray-300 whitespace-pre-wrap break-words">
-                                            {transaction.note}
-                                          </div>
-                                        </div>
-                                        {transaction.lastModifiedBy && (
-                                          <div className="border-t border-gray-600 pt-2">
-                                            <div className="font-medium text-blue-300">แก้ไขล่าสุดโดย:</div>
-                                            <div className="text-gray-200">
-                                              {transaction.lastModifiedBy}
-                                            </div>
-                                            {transaction.lastModifiedByEmail && (
-                                              <div className="text-gray-400 text-xs">
-                                                ({transaction.lastModifiedByEmail})
-                                              </div>
-                                            )}
-                                            {transaction.lastModifiedAt && (
-                                              <div className="text-gray-400 text-xs mt-1">
-                                                {formatDate(transaction.lastModifiedAt)}
-                                              </div>
-                                            )}
-                                          </div>
-                                        )}
-                                      </div>
-                                      {/* Arrow pointing right for left tooltip, down for top tooltip */}
-                                      <div className={`absolute ${index < 3 ? 'left-full top-3 border-4 border-transparent border-l-gray-900 dark:border-l-gray-700' : 'top-full right-4 border-4 border-transparent border-t-gray-900 dark:border-t-gray-700'}`}></div>
-                                    </div>
-                                  </div>
-                                </div>
+                          <td className="py-4 px-4 text-left">
+                            <div className="flex items-center gap-2">
+                              {/* Enhanced status display with icon and better organization */}
+                              <div className="flex items-center gap-1">
+                                <span className={`inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-full ${statusConfig[transaction.status]?.color || statusColors[transaction.status] || 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300'}`}>
+                                  <span className="text-xs">{statusConfig[transaction.status]?.icon || '📋'}</span>
+                                  {statusConfig[transaction.status]?.label || transaction.status}
+                                </span>
                               </div>
-                            ) : (
-                              <div className="max-w-xs">
-                                <div className="flex items-start space-x-2">
-                                  {transaction.lastModifiedBy ? (
-                                    <div className="relative group h-4 w-4 mt-0.5 flex-shrink-0 bg-red-500 rounded-full flex items-center justify-center cursor-help">
-                                      <span className="text-white text-xs font-bold">!</span>
-                                      {/* Tooltip positioned left for first 3 rows, above for others */}
-                                      <div className={`absolute ${index < 3 ? 'right-full top-0 mr-2' : 'bottom-full right-0 mb-2'} px-3 py-2 bg-gray-900 dark:bg-gray-700 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-pre-wrap max-w-sm z-20 shadow-lg`}>
-                                        <div className="space-y-2">
-                                          <div>
-                                            <div className="font-medium text-yellow-300">หมายเหตุ:</div>
-                                            <div className="text-gray-400 italic whitespace-pre-wrap break-words">ไม่มีหมายเหตุ</div>
-                                          </div>
-                                          <div className="border-t border-gray-600 pt-2">
-                                            <div className="font-medium text-blue-300">แก้ไขล่าสุดโดย:</div>
-                                            <div className="text-gray-200">
-                                              {transaction.lastModifiedBy}
-                                            </div>
-                                            {transaction.lastModifiedByEmail && (
-                                              <div className="text-gray-400 text-xs">
-                                                ({transaction.lastModifiedByEmail})
-                                              </div>
-                                            )}
-                                            {transaction.lastModifiedAt && (
-                                              <div className="text-gray-400 text-xs mt-1">
-                                                {formatDate(transaction.lastModifiedAt)}
-                                              </div>
-                                            )}
-                                          </div>
-                                        </div>
-                                        {/* Arrow pointing right for left tooltip, down for top tooltip */}
-                                        <div className={`absolute ${index < 3 ? 'left-full top-3 border-4 border-transparent border-l-gray-900 dark:border-l-gray-700' : 'top-full right-4 border-4 border-transparent border-t-gray-900 dark:border-t-gray-700'}`}></div>
-                                      </div>
-                                    </div>
-                                  ) : (
-                                    <span className="text-gray-400 dark:text-gray-500 text-sm italic">-</span>
-                                  )}
+                              
+                                            {/* Notes indicator */}
+              {(transaction.note || transaction.lastModifiedBy) && (
+                <div className="relative group h-4 w-4 flex-shrink-0 bg-red-500 rounded-full flex items-center justify-center cursor-help">
+                  <span className="text-white text-xs font-bold">!</span>
+                                  
+                                                    {/* Compact tooltip with text wrapping */}
+                  <div className={`absolute ${index < 3 ? 'right-full top-0 mr-2' : 'bottom-full right-0 mb-2'} px-3 py-2 bg-gray-900 dark:bg-gray-700 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none max-w-xs z-30 shadow-lg`}>
+                    <div className="space-y-2">
+                      <div>
+                        <div className="text-yellow-300 font-medium">หมายเหตุ:</div>
+                        <div className="text-gray-200 dark:text-gray-300 break-words">
+                          {transaction.note && transaction.note.length > 100 
+                            ? `${transaction.note.substring(0, 100)}...` 
+                            : (transaction.note || 'ไม่มีหมายเหตุ')
+                          }
+                        </div>
+                      </div>
+                      {transaction.lastModifiedBy && (
+                        <div className="border-t border-gray-600 pt-2">
+                          <div className="text-blue-300 font-medium">แก้ไขโดย:</div>
+                          <div className="text-gray-200 break-words">
+                            {transaction.lastModifiedBy.length > 30 
+                              ? `${transaction.lastModifiedBy.substring(0, 30)}...` 
+                              : transaction.lastModifiedBy
+                            }
+                          </div>
+                          {transaction.lastModifiedAt && (
+                            <div className="text-gray-400 text-xs mt-1">
+                              {formatDate(transaction.lastModifiedAt)}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    {/* Arrow */}
+                    <div className={`absolute ${index < 3 ? 'left-full top-3 border-4 border-transparent border-l-gray-900 dark:border-l-gray-700' : 'top-full right-4 border-4 border-transparent border-t-gray-900 dark:border-t-gray-700'}`}></div>
+                  </div>
                                 </div>
-                              </div>
-                            )}
+                              )}
+                            </div>
                           </td>
                           <td className="py-4 px-4 text-center">
                             {['สำเร็จ', 'ยกเลิก', 'ล้มเหลว'].includes(transaction.status) ? (
