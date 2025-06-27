@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { collection, query, where, getDocs, limit, updateDoc, doc, serverTimestamp } from 'firebase/firestore';
+import { collection, query, where, getDocs, getDoc, limit, updateDoc, doc, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 
 export async function GET(request: NextRequest) {
@@ -21,15 +21,15 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const teamApiKey = authHeader.replace('Bearer ', '');
-    console.log('Team API key:', teamApiKey);
+    const providedApiKey = authHeader.replace('Bearer ', '');
+    console.log('Team API key:', providedApiKey);
 
     try {
       // Find team by API key
       console.log('Querying teams collection...');
       const teamsQuery = query(
         collection(db, 'teams'),
-        where('apiKey', '==', teamApiKey)
+        where('apiKey', '==', providedApiKey)
       );
       
       const teamsSnapshot = await getDocs(teamsQuery);
@@ -48,8 +48,11 @@ export async function GET(request: NextRequest) {
 
       const teamDoc = teamsSnapshot.docs[0];
       const teamId = teamDoc.id;
-      const teamName = teamDoc.data().name;
-      console.log('Found team:', teamId, 'name:', teamName);
+      const teamData = teamDoc.data();
+      const teamName = teamData.name;
+      const teamUrl = teamData.url || '';
+      const teamApiKey = teamData.apiKey || '';
+      console.log('Found team:', teamId, 'name:', teamName, 'url:', teamUrl);
       
       // Get transactions for this team (using same pattern as working APIs)
       console.log('Querying transactions for team:', teamId);
@@ -97,6 +100,51 @@ export async function GET(request: NextRequest) {
       const transactionDoc = pendingTransactions[0].doc;
       const transactionData = pendingTransactions[0].data;
       
+      // Get website data for URL and API Key
+      let websiteUrl = '';
+      let websiteApiKey = '';
+      
+      if (transactionData.websiteId) {
+        try {
+          console.log('Fetching website data for websiteId:', transactionData.websiteId);
+          
+          // Method 1: Try to get website by document ID (most common case)
+          try {
+            const websiteDocRef = doc(db, 'websites', transactionData.websiteId);
+            const websiteDoc = await getDoc(websiteDocRef);
+            
+            if (websiteDoc.exists()) {
+              const websiteData = websiteDoc.data();
+              websiteUrl = websiteData.url || '';
+              websiteApiKey = websiteData.apiKey || '';
+              console.log('Found website by document ID - URL:', websiteUrl, 'API Key:', websiteApiKey ? 'Present' : 'Missing');
+            } else {
+              console.log('Website document not found by ID:', transactionData.websiteId);
+              
+              // Method 2: Fallback - search by websiteId field (legacy support)
+              const websiteQuery = query(
+                collection(db, 'websites'),
+                where('websiteId', '==', transactionData.websiteId)
+              );
+              
+              const websiteSnapshot = await getDocs(websiteQuery);
+              if (!websiteSnapshot.empty) {
+                const websiteData = websiteSnapshot.docs[0].data();
+                websiteUrl = websiteData.url || '';
+                websiteApiKey = websiteData.apiKey || '';
+                console.log('Found website by websiteId field - URL:', websiteUrl, 'API Key:', websiteApiKey ? 'Present' : 'Missing');
+              } else {
+                console.log('No website found with websiteId field:', transactionData.websiteId);
+              }
+            }
+          } catch (docError) {
+            console.error('Error getting website document:', docError);
+          }
+        } catch (websiteError) {
+          console.error('Error fetching website data:', websiteError);
+        }
+      }
+
       // Update status to "กำลังโอน"
       console.log('Updating transaction status to "กำลังโอน" for transaction:', transactionDoc.id);
       await updateDoc(doc(db, 'transactions', transactionDoc.id), {
@@ -134,6 +182,8 @@ export async function GET(request: NextRequest) {
         success: true,
         teamId: teamId,
         teamName: teamName,
+        url: websiteUrl,
+        apiKey: websiteApiKey,
         message: 'Transaction retrieved and status updated to "กำลังโอน"',
         transaction: transaction
       });
