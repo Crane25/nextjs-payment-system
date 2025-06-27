@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useUserProfile } from '../../contexts/UserContext';
 import { usePermission } from '../../hooks/usePermission';
@@ -10,6 +11,16 @@ import { db } from '../../lib/firebase';
 import DashboardLayout from '../../components/DashboardLayout';
 // Removed VirtualScrollTable import - now using regular HTML table
 import { toast } from 'react-hot-toast';
+
+// Portal Modal Component
+const PortalModal = ({ children, isOpen }: { children: React.ReactNode; isOpen: boolean }) => {
+  if (!isOpen) return null;
+  
+  return createPortal(
+    children,
+    document.body
+  );
+};
 
 interface BotTransaction {
   id: string;
@@ -35,10 +46,8 @@ interface BotTransaction {
 
 const statusOptions = [
   'รอโอน',
-  'กำลังดำเนินการ',
   'สำเร็จ',
-  'ยกเลิก',
-  'ล้มเหลว'
+  'ยกเลิก'
 ];
 
 const statusColors: { [key: string]: string } = {
@@ -323,6 +332,12 @@ export default function BotTransactionsPage() {
 
   const handleSaveChanges = () => {
     if (selectedTransaction) {
+      // Validate required note for certain statuses
+      if ((modalStatus === 'สำเร็จ' || modalStatus === 'ยกเลิก') && !modalNote.trim()) {
+        toast.error(`กรุณาใส่หมายเหตุสำหรับสถานะ "${modalStatus}"`);
+        return;
+      }
+      
       updateTransactionStatus(selectedTransaction.id, modalStatus, modalNote);
     }
   };
@@ -777,16 +792,25 @@ export default function BotTransactionsPage() {
                             )}
                           </td>
                           <td className="py-4 px-4 text-center">
-                            <button
-                              onClick={() => openManageModal(transaction)}
-                              disabled={updatingStatus === transaction.id}
-                              className="inline-flex items-center px-3 py-1.5 text-xs font-medium text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/40 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                              <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                              </svg>
-                              จัดการ
-                            </button>
+                            {['สำเร็จ', 'ยกเลิก', 'ล้มเหลว'].includes(transaction.status) ? (
+                              <span className="inline-flex items-center px-3 py-1.5 text-xs font-medium text-gray-400 dark:text-gray-500 bg-gray-100 dark:bg-gray-700 rounded-lg">
+                                <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                                ปิดแล้ว
+                              </span>
+                            ) : (
+                              <button
+                                onClick={() => openManageModal(transaction)}
+                                disabled={updatingStatus === transaction.id}
+                                className="inline-flex items-center px-3 py-1.5 text-xs font-medium text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/40 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                </svg>
+                                จัดการ
+                              </button>
+                            )}
                           </td>
                         </tr>
                       ))
@@ -856,9 +880,9 @@ export default function BotTransactionsPage() {
         </div>
 
         {/* Manage Transaction Modal */}
-        {showManageModal && selectedTransaction && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto">
+        <PortalModal isOpen={showManageModal && !!selectedTransaction}>
+          <div className="fixed inset-0 bg-black/70 backdrop-blur-xl flex items-center justify-center p-4 z-[100]">
+            <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl border border-white/20 dark:border-gray-700/50 max-w-md w-full max-h-[90vh] overflow-y-auto">
               <div className="p-6">
                 {/* Modal Header */}
                 <div className="flex items-center justify-between mb-6">
@@ -875,87 +899,107 @@ export default function BotTransactionsPage() {
                   </button>
                 </div>
 
-                {/* Transaction Info */}
-                <div className="mb-6 p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
-                  <div className="space-y-2 text-sm">
-                    <div className="flex justify-between">
-                      <span className="text-gray-600 dark:text-gray-400">Transaction ID:</span>
-                      <span className="font-mono text-blue-600 dark:text-blue-400">{selectedTransaction.transactionId}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600 dark:text-gray-400">Customer:</span>
-                      <span className="font-medium">{selectedTransaction.customerUsername}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600 dark:text-gray-400">จำนวนเงิน:</span>
-                      <span className="font-bold text-red-600 dark:text-red-400">-฿{formatAmount(selectedTransaction.amount)}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600 dark:text-gray-400">เว็บไซต์:</span>
-                      <span className="font-medium">{selectedTransaction.websiteName}</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Status Selection */}
-                <div className="mb-4">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    สถานะ
-                  </label>
-                  <select
-                    value={modalStatus}
-                    onChange={(e) => setModalStatus(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                  >
-                    {statusOptions.map(status => (
-                      <option key={status} value={status}>
-                        {status}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Note Input */}
-                <div className="mb-6">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    หมายเหตุ
-                  </label>
-                  <textarea
-                    value={modalNote}
-                    onChange={(e) => setModalNote(e.target.value)}
-                    rows={3}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white resize-none"
-                    placeholder="เพิ่มหมายเหตุสำหรับธุรกรรมนี้..."
-                  />
-                </div>
-
-                {/* Modal Actions */}
-                <div className="flex gap-3">
-                  <button
-                    onClick={closeManageModal}
-                    className="flex-1 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition-colors"
-                  >
-                    ยกเลิก
-                  </button>
-                  <button
-                    onClick={handleSaveChanges}
-                    disabled={updatingStatus === selectedTransaction.id}
-                    className="flex-1 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 rounded-lg transition-colors disabled:cursor-not-allowed"
-                  >
-                    {updatingStatus === selectedTransaction.id ? (
-                      <div className="flex items-center justify-center">
-                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                        กำลังบันทึก...
+                {selectedTransaction && (
+                  <>
+                    {/* Transaction Info */}
+                    <div className="mb-6 p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                      <div className="space-y-2 text-sm">
+                        <div className="flex justify-between">
+                          <span className="text-gray-600 dark:text-gray-400">Transaction ID:</span>
+                          <span className="font-mono text-blue-600 dark:text-blue-400">{selectedTransaction.transactionId}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-600 dark:text-gray-400">Customer:</span>
+                          <span className="font-medium">{selectedTransaction.customerUsername}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-600 dark:text-gray-400">จำนวนเงิน:</span>
+                          <span className="font-bold text-red-600 dark:text-red-400">-฿{formatAmount(selectedTransaction.amount)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-600 dark:text-gray-400">เว็บไซต์:</span>
+                          <span className="font-medium">{selectedTransaction.websiteName}</span>
+                        </div>
                       </div>
-                    ) : (
-                      'บันทึกการเปลี่ยนแปลง'
-                    )}
-                  </button>
-                </div>
+                    </div>
+
+                    {/* Status Selection */}
+                    <div className="mb-4">
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                        สถานะ
+                      </label>
+                      <select
+                        value={modalStatus}
+                        onChange={(e) => setModalStatus(e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                      >
+                        {statusOptions.map(status => (
+                          <option key={status} value={status}>
+                            {status}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Note Input */}
+                    <div className="mb-6">
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                        หมายเหตุ
+                        {(modalStatus === 'สำเร็จ' || modalStatus === 'ยกเลิก') && (
+                          <span className="text-red-500 ml-1">*</span>
+                        )}
+                      </label>
+                      {(modalStatus === 'สำเร็จ' || modalStatus === 'ยกเลิก') && (
+                        <p className="text-xs text-red-600 dark:text-red-400 mb-2">
+                          กรุณาใส่หมายเหตุสำหรับสถานะ "{modalStatus}"
+                        </p>
+                      )}
+                      <textarea
+                        value={modalNote}
+                        onChange={(e) => setModalNote(e.target.value)}
+                        rows={3}
+                        className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white resize-none ${
+                          (modalStatus === 'สำเร็จ' || modalStatus === 'ยกเลิก') && !modalNote.trim()
+                            ? 'border-red-300 dark:border-red-600'
+                            : 'border-gray-300 dark:border-gray-600'
+                        }`}
+                        placeholder={
+                          (modalStatus === 'สำเร็จ' || modalStatus === 'ยกเลิก')
+                            ? `กรุณาใส่เหตุผลสำหรับสถานะ "${modalStatus}"...`
+                            : "เพิ่มหมายเหตุสำหรับธุรกรรมนี้..."
+                        }
+                      />
+                    </div>
+
+                    {/* Modal Actions */}
+                    <div className="flex gap-3">
+                      <button
+                        onClick={closeManageModal}
+                        className="flex-1 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition-colors"
+                      >
+                        ยกเลิก
+                      </button>
+                      <button
+                        onClick={handleSaveChanges}
+                        disabled={updatingStatus === selectedTransaction.id}
+                        className="flex-1 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 rounded-lg transition-colors disabled:cursor-not-allowed"
+                      >
+                        {updatingStatus === selectedTransaction.id ? (
+                          <div className="flex items-center justify-center">
+                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                            กำลังบันทึก...
+                          </div>
+                        ) : (
+                          'บันทึกการเปลี่ยนแปลง'
+                        )}
+                      </button>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           </div>
-        )}
+        </PortalModal>
       </div>
     </DashboardLayout>
   );
