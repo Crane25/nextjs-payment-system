@@ -345,13 +345,16 @@ export default function BotTransactionsPage() {
 
   const handleSaveChanges = () => {
     if (selectedTransaction) {
-      // Validate required note for certain statuses
+      // Always set status to "รอโอน" when saving
+      const finalStatus = 'รอโอน';
+      
+      // Validate required note for certain statuses (but since we're forcing "รอโอน", this won't trigger)
       if ((modalStatus === 'สำเร็จ' || modalStatus === 'ยกเลิก') && !modalNote.trim()) {
         toast.error(`กรุณาใส่หมายเหตุสำหรับสถานะ "${modalStatus}"`);
         return;
       }
       
-      updateTransactionStatus(selectedTransaction.id, modalStatus, modalNote);
+      updateTransactionStatus(selectedTransaction.id, finalStatus, modalNote);
     }
   };
 
@@ -726,7 +729,7 @@ export default function BotTransactionsPage() {
                         </td>
                       </tr>
                     ) : (
-                      filteredTransactions.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage).map((transaction) => (
+                      filteredTransactions.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage).map((transaction, index) => (
                         <tr key={transaction.id} className="border-b border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors duration-200">
                           <td className="py-4 px-4">
                             <div className="text-sm font-medium text-gray-900 dark:text-white">
@@ -779,7 +782,8 @@ export default function BotTransactionsPage() {
                                 <div className="flex items-start space-x-2">
                                   <div className="relative group h-4 w-4 mt-0.5 flex-shrink-0 bg-red-500 rounded-full flex items-center justify-center cursor-help">
                                     <span className="text-white text-xs font-bold">!</span>
-                                    <div className="absolute bottom-full right-0 mb-2 px-3 py-2 bg-gray-900 dark:bg-gray-700 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-pre-wrap max-w-sm z-20 shadow-lg">
+                                    {/* Tooltip positioned left for first 3 rows, above for others */}
+                                    <div className={`absolute ${index < 3 ? 'right-full top-0 mr-2' : 'bottom-full right-0 mb-2'} px-3 py-2 bg-gray-900 dark:bg-gray-700 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-pre-wrap max-w-sm z-20 shadow-lg`}>
                                       <div className="space-y-2">
                                         <div>
                                           <div className="font-medium text-yellow-300">หมายเหตุ:</div>
@@ -806,7 +810,8 @@ export default function BotTransactionsPage() {
                                           </div>
                                         )}
                                       </div>
-                                      <div className="absolute top-full right-4 border-4 border-transparent border-t-gray-900 dark:border-t-gray-700"></div>
+                                      {/* Arrow pointing right for left tooltip, down for top tooltip */}
+                                      <div className={`absolute ${index < 3 ? 'left-full top-3 border-4 border-transparent border-l-gray-900 dark:border-l-gray-700' : 'top-full right-4 border-4 border-transparent border-t-gray-900 dark:border-t-gray-700'}`}></div>
                                     </div>
                                   </div>
                                 </div>
@@ -817,7 +822,8 @@ export default function BotTransactionsPage() {
                                   {transaction.lastModifiedBy ? (
                                     <div className="relative group h-4 w-4 mt-0.5 flex-shrink-0 bg-red-500 rounded-full flex items-center justify-center cursor-help">
                                       <span className="text-white text-xs font-bold">!</span>
-                                      <div className="absolute bottom-full right-0 mb-2 px-3 py-2 bg-gray-900 dark:bg-gray-700 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-pre-wrap max-w-sm z-20 shadow-lg">
+                                      {/* Tooltip positioned left for first 3 rows, above for others */}
+                                      <div className={`absolute ${index < 3 ? 'right-full top-0 mr-2' : 'bottom-full right-0 mb-2'} px-3 py-2 bg-gray-900 dark:bg-gray-700 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-pre-wrap max-w-sm z-20 shadow-lg`}>
                                         <div className="space-y-2">
                                           <div>
                                             <div className="font-medium text-yellow-300">หมายเหตุ:</div>
@@ -840,11 +846,13 @@ export default function BotTransactionsPage() {
                                             )}
                                           </div>
                                         </div>
-                                        <div className="absolute top-full right-4 border-4 border-transparent border-t-gray-900 dark:border-t-gray-700"></div>
+                                        {/* Arrow pointing right for left tooltip, down for top tooltip */}
+                                        <div className={`absolute ${index < 3 ? 'left-full top-3 border-4 border-transparent border-l-gray-900 dark:border-l-gray-700' : 'top-full right-4 border-4 border-transparent border-t-gray-900 dark:border-t-gray-700'}`}></div>
                                       </div>
                                     </div>
-                                  ) : null}
-                                  <span className="text-gray-400 dark:text-gray-500 text-sm italic">-</span>
+                                  ) : (
+                                    <span className="text-gray-400 dark:text-gray-500 text-sm italic">-</span>
+                                  )}
                                 </div>
                               </div>
                             )}
