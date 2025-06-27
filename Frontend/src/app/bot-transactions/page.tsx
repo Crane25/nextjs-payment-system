@@ -779,11 +779,11 @@ export default function BotTransactionsPage() {
                                 <div className="flex items-start space-x-2">
                                   <div className="relative group h-4 w-4 mt-0.5 flex-shrink-0 bg-red-500 rounded-full flex items-center justify-center cursor-help">
                                     <span className="text-white text-xs font-bold">!</span>
-                                    <div className="absolute bottom-full left-0 mb-2 px-3 py-2 bg-gray-900 dark:bg-gray-700 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-normal max-w-sm z-20 shadow-lg">
+                                    <div className="absolute bottom-full right-0 mb-2 px-3 py-2 bg-gray-900 dark:bg-gray-700 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-pre-wrap max-w-sm z-20 shadow-lg">
                                       <div className="space-y-2">
                                         <div>
                                           <div className="font-medium text-yellow-300">หมายเหตุ:</div>
-                                          <div className="text-gray-200 dark:text-gray-300">
+                                          <div className="text-gray-200 dark:text-gray-300 whitespace-pre-wrap break-words">
                                             {transaction.note}
                                           </div>
                                         </div>
@@ -806,11 +806,8 @@ export default function BotTransactionsPage() {
                                           </div>
                                         )}
                                       </div>
-                                      <div className="absolute top-full left-4 border-4 border-transparent border-t-gray-900 dark:border-t-gray-700"></div>
+                                      <div className="absolute top-full right-4 border-4 border-transparent border-t-gray-900 dark:border-t-gray-700"></div>
                                     </div>
-                                  </div>
-                                  <div className="text-sm text-gray-700 dark:text-gray-300 break-words">
-                                    {transaction.note.length > 50 ? `${transaction.note.substring(0, 50)}...` : transaction.note}
                                   </div>
                                 </div>
                               </div>
@@ -820,11 +817,11 @@ export default function BotTransactionsPage() {
                                   {transaction.lastModifiedBy ? (
                                     <div className="relative group h-4 w-4 mt-0.5 flex-shrink-0 bg-red-500 rounded-full flex items-center justify-center cursor-help">
                                       <span className="text-white text-xs font-bold">!</span>
-                                      <div className="absolute bottom-full left-0 mb-2 px-3 py-2 bg-gray-900 dark:bg-gray-700 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-normal max-w-sm z-20 shadow-lg">
+                                      <div className="absolute bottom-full right-0 mb-2 px-3 py-2 bg-gray-900 dark:bg-gray-700 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-pre-wrap max-w-sm z-20 shadow-lg">
                                         <div className="space-y-2">
                                           <div>
                                             <div className="font-medium text-yellow-300">หมายเหตุ:</div>
-                                            <div className="text-gray-400 italic">ไม่มีหมายเหตุ</div>
+                                            <div className="text-gray-400 italic whitespace-pre-wrap break-words">ไม่มีหมายเหตุ</div>
                                           </div>
                                           <div className="border-t border-gray-600 pt-2">
                                             <div className="font-medium text-blue-300">แก้ไขล่าสุดโดย:</div>
@@ -843,7 +840,7 @@ export default function BotTransactionsPage() {
                                             )}
                                           </div>
                                         </div>
-                                        <div className="absolute top-full left-4 border-4 border-transparent border-t-gray-900 dark:border-t-gray-700"></div>
+                                        <div className="absolute top-full right-4 border-4 border-transparent border-t-gray-900 dark:border-t-gray-700"></div>
                                       </div>
                                     </div>
                                   ) : null}
