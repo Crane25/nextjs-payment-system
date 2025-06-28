@@ -6,6 +6,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import toast from 'react-hot-toast';
 import Link from 'next/link';
 import { EyeIcon, EyeSlashIcon, UserIcon, LockClosedIcon, UserPlusIcon, ArrowRightIcon } from '@heroicons/react/24/outline';
+import DebugRegistration from '../../components/DebugRegistration';
 
 export default function RegisterPage() {
   const [username, setUsername] = useState('');
@@ -68,6 +69,8 @@ export default function RegisterPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-emerald-500 via-teal-500 to-cyan-500 flex items-center justify-center p-4 relative overflow-hidden">
+      {/* Debug Registration Tool */}
+      <DebugRegistration />
       {/* Animated background elements */}
       <div className="absolute inset-0 overflow-hidden">
         <div className="absolute -top-40 -right-40 w-80 h-80 rounded-full bg-white/10 animate-pulse delay-500"></div>

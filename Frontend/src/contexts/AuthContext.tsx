@@ -7,7 +7,8 @@ import {
   signInWithEmailAndPassword,
   signOut,
   onAuthStateChanged,
-  updateProfile
+  updateProfile,
+  deleteUser
 } from 'firebase/auth';
 import { doc, setDoc, getDoc, runTransaction, writeBatch } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
@@ -91,19 +92,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     
     try {
       await retryOperation(async () => {
-        // Use Firestore transaction to ensure data consistency
-        await runTransaction(db, async (transaction) => {
-          // Check if username already exists
-          const usernameDocRef = doc(db, 'usernames', username);
-          const usernameDoc = await transaction.get(usernameDocRef);
-          
-          if (usernameDoc.exists()) {
-            throw new Error('Username already exists');
-          }
-          
-          // Create user with a fake email (username@app.local)
+        // Step 1: Check if username already exists
+        const usernameDocRef = doc(db, 'usernames', username);
+        const usernameDoc = await getDoc(usernameDocRef);
+        
+        if (usernameDoc.exists()) {
+          throw new Error('Username already exists');
+        }
+        
+        let userCredential: any = null;
+        
+        try {
+          // Step 2: Create user with Firebase Auth (cannot be in transaction)
           const fakeEmail = `${username}@app.local`;
-          const userCredential = await createUserWithEmailAndPassword(auth, fakeEmail, password);
+          // Create Firebase Auth user
+          userCredential = await createUserWithEmailAndPassword(auth, fakeEmail, password);
           
           // Update user profile with username
           await updateProfile(userCredential.user, {
@@ -113,27 +116,48 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           const userId = userCredential.user.uid;
           const timestamp = new Date();
           
-          // Store username mapping in Firestore (within transaction)
-          transaction.set(usernameDocRef, {
-            uid: userId,
-            createdAt: timestamp,
-            username: username
+          // Step 3: Use transaction to write both Firestore documents atomically
+          await runTransaction(db, async (transaction) => {
+            // Double-check username availability within transaction
+            const usernameCheck = await transaction.get(usernameDocRef);
+            if (usernameCheck.exists()) {
+              throw new Error('Username was taken during registration');
+            }
+            
+            // Store username mapping in Firestore
+            transaction.set(usernameDocRef, {
+              uid: userId,
+              createdAt: timestamp,
+              username: username
+            });
+            
+            // Store user data in users collection
+            const userDocRef = doc(db, 'users', userId);
+            transaction.set(userDocRef, {
+              username: username,
+              displayName: username,
+              email: fakeEmail,
+              role: 'user',
+              createdAt: timestamp,
+              lastLogin: timestamp,
+              permissions: []
+            });
           });
-          
-          // Store user data in users collection (within transaction)
-          const userDocRef = doc(db, 'users', userId);
-          transaction.set(userDocRef, {
-            username: username,
-            displayName: username,
-            email: fakeEmail,
-            role: 'user',
-            createdAt: timestamp,
-            lastLogin: timestamp,
-            permissions: []
-          });
-          
           return { userId, fakeEmail, username };
-        });
+          
+        } catch (firestoreError: any) {
+          // If Firestore operations fail but Auth user was created, we need to clean up
+          if (userCredential?.user) {
+            try {
+              // Delete the Auth user if Firestore operations failed
+              await deleteUser(userCredential.user);
+              console.log('Cleaned up Auth user after Firestore failure');
+            } catch (deleteError) {
+              console.error('Failed to cleanup Auth user:', deleteError);
+            }
+          }
+          throw firestoreError;
+        }
       });
 
       // Log successful signup (outside transaction to avoid blocking)
