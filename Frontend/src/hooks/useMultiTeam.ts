@@ -71,14 +71,27 @@ export const useMultiTeam = (mode: 'all' | 'owned' = 'all') => {
           snapshot = await getDocs(teamsQuery);
         } else {
           // Admin: ดูทุกทีมที่ตัวเองเป็นสมาชิก (สำหรับ dashboard และ topup-history)
-          const membersQuery = query(
+          // ใช้ userId ก่อน เพราะแม่นยำกว่า
+          const membersByUserIdQuery = query(
             collection(db, 'teamMembers'),
-            where('email', '==', userProfile.email),
+            where('userId', '==', user.uid),
             where('status', '==', 'active')
           );
           
-          const membersSnapshot = await getDocs(membersQuery);
-          const userTeamIds = membersSnapshot.docs.map(doc => doc.data().teamId);
+          let membersSnapshot = await getDocs(membersByUserIdQuery);
+          let userTeamIds = membersSnapshot.docs.map(doc => doc.data().teamId);
+          
+          // Fallback: ถ้าไม่เจอด้วย userId ให้ลองใช้ email
+          if (userTeamIds.length === 0) {
+            const membersByEmailQuery = query(
+              collection(db, 'teamMembers'),
+              where('email', '==', userProfile.email),
+              where('status', '==', 'active')
+            );
+            
+            membersSnapshot = await getDocs(membersByEmailQuery);
+            userTeamIds = membersSnapshot.docs.map(doc => doc.data().teamId);
+          }
           
 
           
@@ -120,14 +133,27 @@ export const useMultiTeam = (mode: 'all' | 'owned' = 'all') => {
           snapshot = await getDocs(teamsQuery);
         } else {
           // Manager: ดูทุกทีมที่ตัวเองเป็นสมาชิก (สำหรับ dashboard และ topup-history)
-          const membersQuery = query(
+          // ใช้ userId ก่อน เพราะแม่นยำกว่า
+          const membersByUserIdQuery = query(
             collection(db, 'teamMembers'),
-            where('email', '==', userProfile.email),
+            where('userId', '==', user.uid),
             where('status', '==', 'active')
           );
           
-          const membersSnapshot = await getDocs(membersQuery);
-          const userTeamIds = membersSnapshot.docs.map(doc => doc.data().teamId);
+          let membersSnapshot = await getDocs(membersByUserIdQuery);
+          let userTeamIds = membersSnapshot.docs.map(doc => doc.data().teamId);
+          
+          // Fallback: ถ้าไม่เจอด้วย userId ให้ลองใช้ email
+          if (userTeamIds.length === 0) {
+            const membersByEmailQuery = query(
+              collection(db, 'teamMembers'),
+              where('email', '==', userProfile.email),
+              where('status', '==', 'active')
+            );
+            
+            membersSnapshot = await getDocs(membersByEmailQuery);
+            userTeamIds = membersSnapshot.docs.map(doc => doc.data().teamId);
+          }
           
           if (userTeamIds.length > 0) {
             if (userTeamIds.length === 1) {
@@ -159,14 +185,27 @@ export const useMultiTeam = (mode: 'all' | 'owned' = 'all') => {
         }
       } else if (userProfile.role === 'user' && user) {
         // User: ค้นหาทีมที่ตัวเองเป็นสมาชิก
-        const membersQuery = query(
+        // ใช้ userId ก่อน เพราะแม่นยำกว่า
+        const membersByUserIdQuery = query(
           collection(db, 'teamMembers'),
-          where('email', '==', userProfile.email),
+          where('userId', '==', user.uid),
           where('status', '==', 'active')
         );
         
-        const membersSnapshot = await getDocs(membersQuery);
-        const userTeamIds = membersSnapshot.docs.map(doc => doc.data().teamId);
+        let membersSnapshot = await getDocs(membersByUserIdQuery);
+        let userTeamIds = membersSnapshot.docs.map(doc => doc.data().teamId);
+        
+        // Fallback: ถ้าไม่เจอด้วย userId ให้ลองใช้ email
+        if (userTeamIds.length === 0) {
+          const membersByEmailQuery = query(
+            collection(db, 'teamMembers'),
+            where('email', '==', userProfile.email),
+            where('status', '==', 'active')
+          );
+          
+          membersSnapshot = await getDocs(membersByEmailQuery);
+          userTeamIds = membersSnapshot.docs.map(doc => doc.data().teamId);
+        }
         
         if (userTeamIds.length > 0) {
           // ดึงข้อมูลทีมทั้งหมดที่ user เป็นสมาชิก

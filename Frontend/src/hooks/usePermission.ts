@@ -39,7 +39,19 @@ export const usePermission = () => {
         );
         
         const snapshot = await getDocs(membersQuery);
-        const hasActiveTeamMembership = !snapshot.empty;
+        let hasActiveTeamMembership = !snapshot.empty;
+        
+        // Fallback: ถ้าไม่เจอด้วย email ให้ลองใช้ userId (สำหรับข้อมูลที่อาจไม่ sync)
+        if (!hasActiveTeamMembership && user.uid) {
+          const membersByUserIdQuery = query(
+            collection(db, 'teamMembers'),
+            where('userId', '==', user.uid),
+            where('status', '==', 'active')
+          );
+          
+          const userIdSnapshot = await getDocs(membersByUserIdQuery);
+          hasActiveTeamMembership = !userIdSnapshot.empty;
+        }
         
         setIsValidTeamMember(hasActiveTeamMembership);
         
@@ -223,6 +235,34 @@ export const usePermission = () => {
   const isManager = () => user?.role === 'manager';
   const isUser = () => user?.role === 'user';
 
+  // ฟังก์ชันสำหรับ refresh permissions และ team memberships
+  const refreshPermissions = useCallback(async () => {
+    if (!user || !user.email) return;
+
+    try {
+      // Refresh team memberships
+      const membersQuery = query(
+        collection(db, 'teamMembers'),
+        where('email', '==', user.email),
+        where('status', '==', 'active')
+      );
+      
+      const snapshot = await getDocs(membersQuery);
+      const teamIds = snapshot.docs.map(doc => doc.data().teamId);
+      setUserTeamMemberships(teamIds);
+      
+      // Refresh team membership validation
+      const hasActiveTeamMembership = !snapshot.empty;
+      setIsValidTeamMember(hasActiveTeamMembership);
+      
+      if (user.role === 'manager') {
+        setManagerHasTeam(hasActiveTeamMembership);
+      }
+    } catch (error) {
+      console.error('Error refreshing permissions:', error);
+    }
+  }, [user?.email, user?.role]);
+
   return {
     hasPermission,
     canViewWebsites,
@@ -253,6 +293,7 @@ export const usePermission = () => {
     // ฟังก์ชันใหม่สำหรับ multi-team
     isMemberOfTeam,
     hasTeamPermission,
-    userTeamMemberships
+    userTeamMemberships,
+    refreshPermissions
   };
 }; 

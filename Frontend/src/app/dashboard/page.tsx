@@ -44,14 +44,18 @@ export default function Dashboard() {
   const { user } = useAuth();
   const { userProfile } = useUserProfile();
   const { 
+    canViewWebsites, 
     canCreateWebsites, 
     canEditWebsites, 
-    canDeleteWebsites, 
+    canDeleteWebsites,
+    canViewTopup,
     canCreateTopup,
+    canAccessTeamData,
     canViewApiKeys,
     isUser,
     isMemberOfTeam,
-    hasTeamPermission
+    hasTeamPermission,
+    refreshPermissions
   } = usePermission();
   const { teams } = useMultiTeam();
   const [stats, setStats] = useState({
@@ -175,11 +179,20 @@ export default function Dashboard() {
           // ตรวจสอบว่าเว็บไซต์เป็นของผู้ใช้โดยตรง
           if (website.userId === user.uid) return true;
           
+          // ถ้าเป็น admin สามารถเห็นทุกเว็บไซต์
+          if (userProfile?.role === 'admin') return true;
+          
           // ถ้ามีทีม ตรวจสอบว่าผู้ใช้เป็นสมาชิกของทีมนั้นหรือไม่
-          if (teams.length > 0 && website.teamId) {
+          if (website.teamId) {
+            // ตรวจสอบจาก teams ที่โหลดมาแล้ว
             const userTeamIds = teams.map(team => team.id);
             if (userTeamIds.includes(website.teamId)) {
-              return isMemberOfTeam(website.teamId);
+              return true;
+            }
+            
+            // ตรวจสอบจาก userProfile.teamId
+            if (userProfile?.teamId === website.teamId) {
+              return true;
             }
           }
           
@@ -255,7 +268,7 @@ export default function Dashboard() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [user?.uid, teams.length, isMemberOfTeam]);
+  }, [user?.uid, teams.length, userProfile?.role, userProfile?.teamId]);
 
   // Load today's topup amount from topupHistory
   const loadTodayTopupAmount = useCallback(async () => {
@@ -344,12 +357,13 @@ export default function Dashboard() {
   }, [user, userProfile, teams]);
 
   // Force refresh function
-  const handleRefreshWebsites = useCallback(() => {
+  const handleRefreshWebsites = useCallback(async () => {
     websitesCache = null; // Clear cache
+    await refreshPermissions(); // Refresh permissions first
     loadWebsitesOptimized(true);
     loadTodayTopupAmount(); // Also refresh today's topup amount
     loadTodayWithdrawAmount(); // Also refresh today's withdraw amount
-  }, [loadWebsitesOptimized, loadTodayTopupAmount, loadTodayWithdrawAmount]);
+  }, [loadWebsitesOptimized, loadTodayTopupAmount, loadTodayWithdrawAmount, refreshPermissions]);
 
   useEffect(() => {
     if (user && teams.length >= 0) { // รอให้ teams โหลดเสร็จ (อาจจะ 0 หรือมากกว่า)
@@ -880,14 +894,6 @@ export default function Dashboard() {
     try {
       const website = websites.find(w => w.id === topupConfirm.websiteId);
       if (!website) return;
-      
-      // ตรวจสอบสิทธิ์ในการเติมเงิน
-      if (website.teamId && !hasTeamPermission(website.teamId, 'topup', 'create')) {
-        toast.error('คุณไม่มีสิทธิ์เติมเงินสำหรับเว็บไซต์นี้');
-        setTopupConfirm({ show: false, websiteId: '', websiteName: '', amount: 0, note: '' });
-        setIsTopupProcessing(false);
-        return;
-      }
 
       const newBalance = website.balance + topupConfirm.amount;
       const newDailyTopup = website.dailyTopup + topupConfirm.amount;
@@ -1369,7 +1375,12 @@ export default function Dashboard() {
                         <GlobeAltIcon className="h-12 w-12 mx-auto mb-2 opacity-50" />
                         <p>ยังไม่มีเว็บไซต์</p>
                         {teams.length > 0 ? (
-                          <p className="text-sm">คลิก &quot;เพิ่มเว็บไซต์&quot; เพื่อเริ่มต้น</p>
+                          <div className="space-y-2">
+                            <p className="text-sm">คลิก &quot;เพิ่มเว็บไซต์&quot; เพื่อเริ่มต้น</p>
+                            <p className="text-xs text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30 px-3 py-1 rounded-lg inline-block">
+                              💡 หากเพิ่งเข้าร่วมทีม กรุณากดปุ่ม &quot;รีเฟรช&quot; เพื่อดูข้อมูลใหม่
+                            </p>
+                          </div>
                         ) : (
                           <p className="text-sm text-blue-600 dark:text-blue-400">
                             สร้างทีมหรือเข้าร่วมทีมเพื่อเริ่มจัดการเว็บไซต์
@@ -1474,15 +1485,14 @@ export default function Dashboard() {
                           </td>
                           <td className="py-4 px-4">
                             <div className="flex items-center justify-center space-x-2">
-                              {canCreateTopup() && (!website.teamId || hasTeamPermission(website.teamId, 'topup', 'create')) && (
-                                <button 
-                                  onClick={() => showTopupModal(website.id, website.name)}
-                                  className="flex items-center space-x-1 px-2 py-1 bg-green-100 text-green-700 hover:bg-green-200 dark:bg-green-900/30 dark:text-green-400 rounded-lg text-xs font-medium transition-colors"
-                                >
-                                  <CurrencyDollarIcon className="h-3 w-3" />
-                                  <span>เติมเงิน</span>
-                                </button>
-                              )}
+                              {/* ปุ่มเติมเงิน - แสดงให้ทุกคนที่เห็นเว็บไซต์ */}
+                              <button 
+                                onClick={() => showTopupModal(website.id, website.name)}
+                                className="flex items-center space-x-1 px-2 py-1 bg-green-100 text-green-700 hover:bg-green-200 dark:bg-green-900/30 dark:text-green-400 rounded-lg text-xs font-medium transition-colors"
+                              >
+                                <CurrencyDollarIcon className="h-3 w-3" />
+                                <span>เติมเงิน</span>
+                              </button>
                               {/* ซ่อนปุ่มถอนเงินชั่วคราว */}
                               {false && canDeleteWebsites() && (!website.teamId || hasTeamPermission(website.teamId, 'websites', 'delete')) && (
                                 <button 
@@ -1503,9 +1513,8 @@ export default function Dashboard() {
                                 </button>
                               )}
                               {/* แสดงข้อความเมื่อไม่มีสิทธิ์ */}
-                              {(!canCreateTopup() || (website.teamId && !hasTeamPermission(website.teamId, 'topup', 'create'))) && 
-                               (!canDeleteWebsites() || (website.teamId && !hasTeamPermission(website.teamId, 'websites', 'delete'))) && (
-                                <span className="text-xs text-gray-400 dark:text-gray-500">ไม่มีสิทธิ์จัดการ</span>
+                              {(!canDeleteWebsites() || (website.teamId && !hasTeamPermission(website.teamId, 'websites', 'delete'))) && (
+                                <span className="text-xs text-gray-400 dark:text-gray-500">ไม่มีสิทธิ์ลบ</span>
                               )}
                             </div>
                           </td>
