@@ -119,6 +119,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             displayName: username
           });
           
+          // รอให้ Auth token อัพเดท
+          await userCredential.user.getIdToken(true);
+          
           // Step 3: Use production-safe registration for Firestore operations
           if (isProductionEnvironment()) {
             const result = await productionSafeRegistration(username, password, userCredential.user);

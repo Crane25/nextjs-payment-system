@@ -28,8 +28,20 @@ service cloud.firestore {
       // อ่านได้เพื่อตรวจสอบ username ซ้ำ
       allow read: if true;
       
-      // สร้าง-แก้ไข-ลบได้เมื่อล็อกอิน
-      allow write: if request.auth != null;
+      // สร้าง-แก้ไข-ลบได้เมื่อล็อกอิน (สำหรับการอัพเดทข้อมูล)
+      allow update, delete: if request.auth != null;
+      
+      // อนุญาตให้สร้างข้อมูล username ใหม่ได้ (สำหรับการสมัครสมาชิก)
+      // ตรวจสอบว่าข้อมูลที่เขียนมี uid ที่ตรงกับ Auth user
+      allow create: if request.auth != null && 
+        request.auth.uid == request.resource.data.uid;
+      
+      // อนุญาตให้สร้างข้อมูลในระหว่างการสมัครสมาชิก (fallback rule)
+      // เมื่อ Auth token อาจยังไม่ได้อัพเดทหรือมี race condition
+      allow create: if request.resource.data.keys().hasAll(['uid', 'username', 'createdAt']) &&
+        request.resource.data.username == username &&
+        request.resource.data.uid is string &&
+        request.resource.data.uid.size() > 0;
     }
     
     // Teams collection

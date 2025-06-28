@@ -79,6 +79,12 @@ export async function productionSafeRegistration(
     const timestamp = new Date();
     const fakeEmail = `${username}@app.local`;
     
+    // รอให้ Auth token อัพเดทและพร้อมใช้งาน
+    await authUser.getIdToken(true);
+    
+    // รอสักครู่เพื่อให้ Auth state อัพเดทใน Firestore
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
     // ใช้ production-safe transaction
     await productionSafeTransaction(async () => {
       await runTransaction(db, async (transaction) => {
