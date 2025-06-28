@@ -139,19 +139,31 @@ export function middleware(request: NextRequest) {
 
     // 10. CSRF Protection for state-changing requests
     if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(method) && path.startsWith('/api/')) {
-      const csrfValidation = validateCSRFToken(request);
-      if (!csrfValidation.isValid) {
-        SecurityMonitor.logEvent('csrf_validation_failed', {
-          ip,
-          path,
-          method,
-          reason: csrfValidation.reason,
-          userAgent
-        }, 'high', 'csrf');
-        
-      return new NextResponse('CSRF Token Invalid', { status: 403 });
+      // Skip CSRF validation for Firebase Auth related endpoints and public APIs
+      const skipCSRFPaths = [
+        '/api/auth/',
+        '/api/public/',
+        '/api/health',
+        '/api/team/websites' // Public API for team website updates
+      ];
+      
+      const shouldSkipCSRF = skipCSRFPaths.some(skipPath => path.startsWith(skipPath));
+      
+      if (!shouldSkipCSRF) {
+        const csrfValidation = validateCSRFToken(request);
+        if (!csrfValidation.isValid) {
+          SecurityMonitor.logEvent('csrf_validation_failed', {
+            ip,
+            path,
+            method,
+            reason: csrfValidation.reason,
+            userAgent
+          }, 'high', 'csrf');
+          
+        return new NextResponse('CSRF Token Invalid', { status: 403 });
+        }
+      }
     }
-  }
   
     // Continue to next middleware/page
     const response = NextResponse.next();
@@ -285,8 +297,10 @@ function checkRateLimit(request: NextRequest, ip: string, path: string): RateLim
   let windowMs = appConfig.security.rateLimitWindowMs;
 
   // Stricter limits for sensitive endpoints
-  if (path.startsWith('/api/auth/')) {
-    maxRequests = Math.floor(maxRequests * 0.2); // 20% of normal limit
+  if (path.startsWith('/api/auth/login')) {
+    maxRequests = Math.floor(maxRequests * 0.2); // 20% of normal limit for login
+  } else if (path.startsWith('/api/auth/register') || path === '/register') {
+    maxRequests = Math.floor(maxRequests * 0.3); // 30% of normal limit for registration (less strict)
   } else if (path.startsWith('/api/security/')) {
     maxRequests = Math.floor(maxRequests * 0.1); // 10% of normal limit
   } else if (path.startsWith('/api/')) {
