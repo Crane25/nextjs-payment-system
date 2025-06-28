@@ -5,7 +5,6 @@ import { useAuth } from '../contexts/AuthContext';
 import { useUserProfile } from '../contexts/UserContext';
 import { useRouter } from 'next/navigation';
 import Sidebar from './Sidebar';
-import UserValidationStatus from './UserValidationStatus';
 import { Bars3Icon, BellIcon } from '@heroicons/react/24/outline';
 
 interface DashboardLayoutProps {
@@ -107,8 +106,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({
         </main>
       </div>
       
-      {/* User Validation Status - Development Only */}
-      <UserValidationStatus />
+
     </div>
   );
 };

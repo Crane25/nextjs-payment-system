@@ -455,11 +455,34 @@ function validateCSRFToken(request: NextRequest): { isValid: boolean; reason?: s
     return { isValid: true };
   }
 
+  // For Firebase Auth and other client-side operations, we can't provide CSRF tokens
+  // So we'll implement a more lenient validation for production
   const token = request.headers.get('x-csrf-token') || request.headers.get('csrf-token');
-  const sessionId = request.headers.get('x-session-id') || 'anonymous';
-
+  const origin = request.headers.get('origin');
+  const referer = request.headers.get('referer');
+  
+  // If no token provided, check if request is from same origin
   if (!token) {
-    return { isValid: false, reason: 'CSRF token missing' };
+    // Allow same-origin requests without CSRF token
+    if (origin || referer) {
+      try {
+        const requestUrl = new URL(request.url);
+        const originUrl = origin ? new URL(origin) : null;
+        const refererUrl = referer ? new URL(referer) : null;
+        
+        // Allow if origin or referer matches the current domain
+        if (originUrl && originUrl.hostname === requestUrl.hostname) {
+          return { isValid: true };
+        }
+        if (refererUrl && refererUrl.hostname === requestUrl.hostname) {
+          return { isValid: true };
+        }
+      } catch {
+        // If URL parsing fails, continue with token validation
+      }
+    }
+    
+    return { isValid: false, reason: 'CSRF token missing and origin verification failed' };
   }
 
   // Basic token format validation

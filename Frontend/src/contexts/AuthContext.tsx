@@ -14,6 +14,10 @@ import { doc, setDoc, getDoc, runTransaction, writeBatch } from 'firebase/firest
 import { auth, db } from '../lib/firebase';
 import { logLogin, logSignup } from '../utils/logger';
 import { validateAndRepairUserData } from '../utils/userValidation';
+import { 
+  isProductionEnvironment, 
+  productionSafeRegistration
+} from '../utils/productionFixes';
 
 interface AuthContextType {
   user: User | null;
@@ -90,6 +94,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       throw new Error('Firebase not initialized');
     }
     
+
+    
     try {
       await retryOperation(async () => {
         // Step 1: Check if username already exists
@@ -113,37 +119,46 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             displayName: username
           });
           
-          const userId = userCredential.user.uid;
-          const timestamp = new Date();
-          
-          // Step 3: Use transaction to write both Firestore documents atomically
-          await runTransaction(db, async (transaction) => {
-            // Double-check username availability within transaction
-            const usernameCheck = await transaction.get(usernameDocRef);
-            if (usernameCheck.exists()) {
-              throw new Error('Username was taken during registration');
+          // Step 3: Use production-safe registration for Firestore operations
+          if (isProductionEnvironment()) {
+            const result = await productionSafeRegistration(username, password, userCredential.user);
+            if (!result.success) {
+              throw new Error(result.error || 'Production registration failed');
             }
+          } else {
+            // Development: Use original transaction method
+            const userId = userCredential.user.uid;
+            const timestamp = new Date();
             
-            // Store username mapping in Firestore
-            transaction.set(usernameDocRef, {
-              uid: userId,
-              createdAt: timestamp,
-              username: username
+            await runTransaction(db, async (transaction) => {
+              // Double-check username availability within transaction
+              const usernameCheck = await transaction.get(usernameDocRef);
+              if (usernameCheck.exists()) {
+                throw new Error('Username was taken during registration');
+              }
+              
+              // Store username mapping in Firestore
+              transaction.set(usernameDocRef, {
+                uid: userId,
+                createdAt: timestamp,
+                username: username
+              });
+              
+              // Store user data in users collection
+              const userDocRef = doc(db, 'users', userId);
+              transaction.set(userDocRef, {
+                username: username,
+                displayName: username,
+                email: fakeEmail,
+                role: 'user',
+                createdAt: timestamp,
+                lastLogin: timestamp,
+                permissions: []
+              });
             });
-            
-            // Store user data in users collection
-            const userDocRef = doc(db, 'users', userId);
-            transaction.set(userDocRef, {
-              username: username,
-              displayName: username,
-              email: fakeEmail,
-              role: 'user',
-              createdAt: timestamp,
-              lastLogin: timestamp,
-              permissions: []
-            });
-          });
-          return { userId, fakeEmail, username };
+          }
+          
+          return { userId: userCredential.user.uid, fakeEmail, username };
           
         } catch (firestoreError: any) {
           // If Firestore operations fail but Auth user was created, we need to clean up
