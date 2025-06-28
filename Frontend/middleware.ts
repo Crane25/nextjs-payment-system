@@ -503,12 +503,10 @@ function validateCSRFToken(request: NextRequest): { isValid: boolean; reason?: s
 export const config = {
   matcher: [
     /*
-     * Match all request paths except for the ones starting with:
-     * - _next/static (static files)
-     * - _next/image (image optimization files)
-     * - favicon.ico (favicon file)
-     * - public folder files
+     * Match only API routes that need security middleware
+     * Exclude all client-side routes, static files, and Firebase operations
+     * Firebase operations happen entirely on the client side and don't need middleware
      */
-    '/((?!_next/static|_next/image|favicon.ico|favicon.svg|public/).*)',
+    '/api/:path*', // Only API routes need security middleware
   ],
 }; 
