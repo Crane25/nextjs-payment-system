@@ -1196,11 +1196,27 @@ export default function Dashboard() {
     }
   ];
 
-  // ตรวจสอบสิทธิ์การเข้าถึง dashboard
-  // ผู้ใช้ที่มี teamId สามารถเข้า dashboard ได้ แม้จะเป็น user role
-  if (isUser() && !userProfile?.teamId) {
-    window.location.href = '/no-team';
-    return null;
+  // ผู้ใช้สามารถเข้า dashboard ได้ทุกคน ไม่ว่าจะมีทีมหรือไม่
+  // เอาการตรวจสอบและ redirect ไป /no-team ออก
+  // ให้ผู้ใช้สามารถใช้งานระบบได้ปกติ
+  
+  // ตรวจสอบว่าเป็นผู้ใช้ใหม่หรือไม่ เพื่อแสดง loading ระหว่างรอข้อมูล
+  const isNewUser = user?.metadata?.creationTime && 
+    (Date.now() - new Date(user.metadata.creationTime).getTime()) < 10000; // 10 วินาที
+
+  if (isNewUser && loading) {
+    // แสดง loading สำหรับผู้ใช้ใหม่ที่ข้อมูลยังโหลดไม่เสร็จ
+    return (
+      <DashboardLayout title="กำลังเตรียมข้อมูล" subtitle="กรุณารอสักครู่...">
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-600 mx-auto mb-4"></div>
+            <p className="text-gray-600 dark:text-gray-400 mb-2">กำลังโหลดข้อมูลบัญชี</p>
+            <p className="text-sm text-gray-500 dark:text-gray-500">กรุณารอสักครู่...</p>
+          </div>
+        </div>
+      </DashboardLayout>
+    );
   }
 
   return (
@@ -1305,16 +1321,16 @@ export default function Dashboard() {
                   <div className="flex items-center space-x-2">
                     <button
                       onClick={() => {
-                        toast.error(`ต้องมีทีมก่อนถึงจะสามารถเพิ่มเว็บไซต์ได้ (ทีม: ${teams.length})`);
+                        toast.error(`สร้างทีมหรือเข้าร่วมทีมก่อนเพื่อเพิ่มเว็บไซต์ (ทีม: ${teams.length})`);
                       }}
                       className="flex items-center space-x-2 bg-gray-400 dark:bg-gray-600 text-white px-4 py-2 rounded-xl cursor-not-allowed opacity-60 hover:opacity-70 transition-opacity"
-                      title="ต้องมีทีมก่อนถึงจะสามารถเพิ่มเว็บไซต์ได้"
+                      title="สร้างทีมหรือเข้าร่วมทีมก่อนเพื่อเพิ่มเว็บไซต์"
                     >
                       <PlusIcon className="h-4 w-4" />
                       <span>เพิ่มเว็บไซต์</span>
                     </button>
-                    <div className="text-sm text-orange-600 dark:text-orange-400 bg-orange-50 dark:bg-orange-900/30 px-3 py-1 rounded-lg">
-                      ต้องมีทีมก่อน (จำนวนทีม: {teams.length})
+                    <div className="text-sm text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30 px-3 py-1 rounded-lg">
+                      สร้างทีมเพื่อเริ่มต้น (จำนวนทีม: {teams.length})
                     </div>
                   </div>
                 )
@@ -1355,8 +1371,8 @@ export default function Dashboard() {
                         {teams.length > 0 ? (
                           <p className="text-sm">คลิก &quot;เพิ่มเว็บไซต์&quot; เพื่อเริ่มต้น</p>
                         ) : (
-                          <p className="text-sm text-orange-600 dark:text-orange-400">
-                            ต้องมีทีมก่อนถึงจะสามารถเพิ่มเว็บไซต์ได้
+                          <p className="text-sm text-blue-600 dark:text-blue-400">
+                            สร้างทีมหรือเข้าร่วมทีมเพื่อเริ่มจัดการเว็บไซต์
                           </p>
                         )}
                       </div>

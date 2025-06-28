@@ -178,12 +178,44 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       });
 
-      // Log successful signup (outside transaction to avoid blocking)
+      // Verify data was written successfully before completing signup
       try {
-        const fakeEmail = `${username}@app.local`;
         const currentUser = auth.currentUser;
         if (currentUser) {
-          await logSignup(currentUser.uid, fakeEmail, username);
+          const userId = currentUser.uid;
+          
+          // ตรวจสอบว่าข้อมูลถูกบันทึกลงฐานข้อมูลแล้วหรือไม่
+          const userDocRef = doc(db, 'users', userId);
+          const usernameDocRef = doc(db, 'usernames', username);
+          
+          let verificationAttempts = 0;
+          const maxVerificationAttempts = 5;
+          
+          while (verificationAttempts < maxVerificationAttempts) {
+            const [userDoc, usernameDoc] = await Promise.all([
+              getDoc(userDocRef),
+              getDoc(usernameDocRef)
+            ]);
+            
+            if (userDoc.exists() && usernameDoc.exists()) {
+              console.log('✅ Registration data verified in database');
+              break;
+            }
+            
+            verificationAttempts++;
+            console.log(`⏳ Verification attempt ${verificationAttempts}/${maxVerificationAttempts}`);
+            
+            if (verificationAttempts < maxVerificationAttempts) {
+              // รอ 1 วินาทีก่อนตรวจสอบอีกครั้ง
+              await new Promise(resolve => setTimeout(resolve, 1000));
+            } else {
+              console.warn('⚠️ Registration data not found after verification attempts');
+            }
+          }
+          
+          // Log successful signup
+          const fakeEmail = `${username}@app.local`;
+          await logSignup(userId, fakeEmail, username);
         }
       } catch (logError) {
         // Don't fail signup if logging fails

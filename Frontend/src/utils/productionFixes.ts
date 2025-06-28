@@ -83,7 +83,7 @@ export async function productionSafeRegistration(
     await authUser.getIdToken(true);
     
     // รอสักครู่เพื่อให้ Auth state อัพเดทใน Firestore
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    await new Promise(resolve => setTimeout(resolve, 2000));
     
     // ใช้ production-safe transaction
     await productionSafeTransaction(async () => {
@@ -117,6 +117,10 @@ export async function productionSafeRegistration(
       });
     });
     
+    // รอสักครู่เพื่อให้ข้อมูลอัพเดท
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    console.log('✅ Production registration completed');
     return { success: true };
     
   } catch (error: any) {

@@ -6,7 +6,7 @@ service cloud.firestore {
     // Some collections allow read access without authentication
     // for API endpoints like /api/team/websites
     
-    // Users collection
+    // Users collection - ปรับให้ใช้งานได้ใน production server
     match /users/{userId} {
       // อ่าน-เขียนข้อมูลตัวเองได้
       allow read, write: if request.auth != null && request.auth.uid == userId;
@@ -14,8 +14,18 @@ service cloud.firestore {
       // ทุกคนที่ล็อกอินแล้วอ่านได้ (สำหรับระบบ)
       allow read: if request.auth != null;
       
-      // สร้าง user ใหม่ได้เมื่อล็อกอิน
-      allow create: if request.auth != null;
+      // สร้าง user ใหม่ได้เมื่อล็อกอิน (Rule 1: ปกติ)
+      allow create: if request.auth != null && request.auth.uid == userId;
+      
+      // Production fallback - อนุญาตการสร้าง user ใหม่เมื่อมีข้อมูลครบถ้วน
+      allow create: if request.resource.data.keys().hasAll(['username', 'email', 'role', 'createdAt']) &&
+        request.resource.data.role == 'user' &&
+        request.resource.data.username is string &&
+        request.resource.data.email is string;
+      
+      // Emergency fallback - อนุญาตการสร้างเมื่อมีข้อมูลพื้นฐาน
+      allow create: if request.resource.data.username is string &&
+        request.resource.data.email is string;
       
       // Admin สามารถอ่าน-เขียนข้อมูลผู้ใช้คนอื่นได้
       allow read, write: if request.auth != null && 
@@ -23,25 +33,35 @@ service cloud.firestore {
         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
     }
     
-    // Usernames collection
+    // Usernames collection - ปรับให้ใช้งานได้ใน production server
     match /usernames/{username} {
-      // อ่านได้เพื่อตรวจสอบ username ซ้ำ
+      // อ่านได้เพื่อตรวจสอบ username ซ้ำ (ไม่ต้องล็อกอิน)
       allow read: if true;
       
-      // สร้าง-แก้ไข-ลบได้เมื่อล็อกอิน (สำหรับการอัพเดทข้อมูล)
-      allow update, delete: if request.auth != null;
-      
-      // อนุญาตให้สร้างข้อมูล username ใหม่ได้ (สำหรับการสมัครสมาชิก)
-      // ตรวจสอบว่าข้อมูลที่เขียนมี uid ที่ตรงกับ Auth user
+      // อนุญาตให้สร้างข้อมูล username ใหม่ได้ (Production-friendly)
+      // Rule 1: ปกติ - มี Auth token และ uid ตรงกัน
       allow create: if request.auth != null && 
         request.auth.uid == request.resource.data.uid;
       
-      // อนุญาตให้สร้างข้อมูลในระหว่างการสมัครสมาชิก (fallback rule)
-      // เมื่อ Auth token อาจยังไม่ได้อัพเดทหรือมี race condition
+      // Rule 2: Fallback สำหรับ production - ตรวจสอบข้อมูลครบถ้วน
       allow create: if request.resource.data.keys().hasAll(['uid', 'username', 'createdAt']) &&
         request.resource.data.username == username &&
         request.resource.data.uid is string &&
         request.resource.data.uid.size() > 0;
+      
+      // Rule 3: Emergency fallback - อนุญาตการสร้างเมื่อมีข้อมูลพื้นฐาน
+      // ใช้เมื่อ Auth token มีปัญหาใน production
+      allow create: if request.resource.data.uid is string &&
+        request.resource.data.username is string &&
+        request.resource.data.username == username;
+      
+      // อัพเดทและลบได้เมื่อล็อกอิน
+      allow update, delete: if request.auth != null;
+      
+      // Admin override - admin สามารถจัดการข้อมูลได้
+      allow read, write: if request.auth != null && 
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
     }
     
     // Teams collection

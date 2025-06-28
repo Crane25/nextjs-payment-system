@@ -136,7 +136,10 @@ export const usePermission = () => {
   const canViewUsers = () => hasPermission('users', 'read');
   const canManageUsers = () => hasPermission('users', 'update');
 
-  const canViewSettings = () => hasPermission('settings', 'read');
+  const canViewSettings = () => {
+    // ผู้ใช้ทุกคนสามารถเข้าหน้าตั้งค่าได้ ไม่ว่าจะมีทีมหรือไม่
+    return !!user;
+  };
   const canEditSettings = () => hasPermission('settings', 'update');
 
   // เฉพาะ Admin และ Manager เท่านั้นที่สามารถดูหน้าจัดการทีมได้

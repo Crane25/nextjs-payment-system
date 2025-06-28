@@ -45,6 +45,10 @@ export default function RegisterPage() {
     try {
       await signUp(username, password);
       toast.success('สมัครสมาชิกสำเร็จ!');
+      
+      // รอสักครู่เพื่อให้ข้อมูลถูกบันทึกลงฐานข้อมูลเสร็จสิ้น
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
       router.push('/dashboard');
     } catch (error: any) {
       // Registration error - provide user-friendly messages
