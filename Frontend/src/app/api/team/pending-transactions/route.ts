@@ -66,18 +66,18 @@ export async function GET(request: NextRequest) {
           createdAt: doc.data().createdAt?.toDate?.() || new Date(doc.data().createdAt)
         }));
       
-      // Create audit log for request
-      await addDoc(collection(db, 'audit_logs'), {
-        action: 'pending_transactions_request',
-        apiEndpoint: '/api/team/pending-transactions',
-        teamId: teamId,
-        teamName: teamName,
-        pendingCount: pendingTransactions.length,
-        timestamp: serverTimestamp(),
-        success: true,
-        userAgent: request.headers.get('User-Agent') || 'Unknown',
-        ip: request.headers.get('X-Forwarded-For') || 'Unknown'
-      });
+      // Create audit log for request - DISABLED
+      // await addDoc(collection(db, 'audit_logs'), {
+      //   action: 'pending_transactions_request',
+      //   apiEndpoint: '/api/team/pending-transactions',
+      //   teamId: teamId,
+      //   teamName: teamName,
+      //   pendingCount: pendingTransactions.length,
+      //   timestamp: serverTimestamp(),
+      //   success: true,
+      //   userAgent: request.headers.get('User-Agent') || 'Unknown',
+      //   ip: request.headers.get('X-Forwarded-For') || 'Unknown'
+      // });
 
       if (pendingTransactions.length === 0) {
         return NextResponse.json({
@@ -159,28 +159,28 @@ export async function GET(request: NextRequest) {
           processingStartedAt: serverTimestamp()
         });
 
-        // Create audit log for status update
-        const auditLogData = {
-          action: 'transaction_status_change',
-          apiEndpoint: '/api/team/pending-transactions',
-          teamId: teamId,
-          teamName: teamName,
-          transactionId: transactionDoc.id,
-          originalTransactionId: transactionData.transactionId,
-          customerUsername: transactionData.customerUsername,
-          websiteId: transactionData.websiteId,
-          websiteName: transactionData.websiteName,
-          amount: transactionData.amount,
-          oldStatus: 'รอโอน',
-          newStatus: 'กำลังโอน',
-          timestamp: serverTimestamp(),
-          success: true,
-          userAgent: request.headers.get('User-Agent') || 'Unknown',
-          ip: request.headers.get('X-Forwarded-For') || 'Unknown'
-        };
+        // Create audit log for status update - DISABLED
+        // const auditLogData = {
+        //   action: 'transaction_status_change',
+        //   apiEndpoint: '/api/team/pending-transactions',
+        //   teamId: teamId,
+        //   teamName: teamName,
+        //   transactionId: transactionDoc.id,
+        //   originalTransactionId: transactionData.transactionId,
+        //   customerUsername: transactionData.customerUsername,
+        //   websiteId: transactionData.websiteId,
+        //   websiteName: transactionData.websiteName,
+        //   amount: transactionData.amount,
+        //   oldStatus: 'รอโอน',
+        //   newStatus: 'กำลังโอน',
+        //   timestamp: serverTimestamp(),
+        //   success: true,
+        //   userAgent: request.headers.get('User-Agent') || 'Unknown',
+        //   ip: request.headers.get('X-Forwarded-For') || 'Unknown'
+        // };
 
-        const auditRef = doc(collection(db, 'audit_logs'));
-        transaction.set(auditRef, auditLogData);
+        // const auditRef = doc(collection(db, 'audit_logs'));
+        // transaction.set(auditRef, auditLogData);
 
         return currentTransactionData;
       });
@@ -225,20 +225,20 @@ export async function GET(request: NextRequest) {
     } catch (dbError) {
       console.error('Database error:', dbError);
       
-      // Create error audit log
-      try {
-        await addDoc(collection(db, 'audit_logs'), {
-          action: 'pending_transactions_request_failed',
-          apiEndpoint: '/api/team/pending-transactions',
-          error: dbError instanceof Error ? dbError.message : 'Unknown database error',
-          timestamp: serverTimestamp(),
-          success: false,
-          userAgent: request.headers.get('User-Agent') || 'Unknown',
-          ip: request.headers.get('X-Forwarded-For') || 'Unknown'
-        });
-      } catch (auditError) {
-        console.error('Failed to create error audit log:', auditError);
-      }
+      // Create error audit log - DISABLED
+      // try {
+      //   await addDoc(collection(db, 'audit_logs'), {
+      //     action: 'pending_transactions_request_failed',
+      //     apiEndpoint: '/api/team/pending-transactions',
+      //     error: dbError instanceof Error ? dbError.message : 'Unknown database error',
+      //     timestamp: serverTimestamp(),
+      //     success: false,
+      //     userAgent: request.headers.get('User-Agent') || 'Unknown',
+      //     ip: request.headers.get('X-Forwarded-For') || 'Unknown'
+      //   });
+      // } catch (auditError) {
+      //   console.error('Failed to create error audit log:', auditError);
+      // }
 
       return NextResponse.json(
         { 
