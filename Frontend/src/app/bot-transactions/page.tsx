@@ -131,6 +131,10 @@ export default function BotTransactionsPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(50);
   
+  // Load more functionality
+  const [hasMoreData, setHasMoreData] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  
   // Use refs for values that shouldn't trigger re-renders
   const isLoadingRef = useRef(false);
   
@@ -150,7 +154,7 @@ export default function BotTransactionsPage() {
   // Real-time listener
   const unsubscribeRef = useRef<(() => void) | null>(null);
 
-  // Optimized loading function with traditional pagination
+  // Optimized loading function with proper server-side pagination
   const loadTransactions = useCallback(async (forceRefresh = false) => {
     if (!user || !userProfile || teamsLoading) {
       return;
@@ -169,6 +173,7 @@ export default function BotTransactionsPage() {
         setRefreshing(true);
         setTransactions([]);
         setCurrentPage(1);
+        setHasMoreData(true);
       } else {
         setLoading(true);
       }
@@ -186,35 +191,45 @@ export default function BotTransactionsPage() {
 
       setError(null);
 
-      // Use optimized query with cursor-based pagination
+      // Use optimized query to fetch bot transactions specifically
       const queryStartTime = performance.now();
       
       let allTransactionDocs: any[] = [];
       
       for (const teamId of userTeamIds) {
         try {
-          // Use single-field query to avoid composite index requirements
+          // Try compound query with composite index first
           let teamQuery = query(
             collection(db, 'transactions'),
             where('teamId', '==', teamId),
-            limit(1000) // Get more data for client-side processing
+            orderBy('createdAt', 'desc'),
+            limit(2000) // Increased limit to get more transactions
           );
 
           const teamSnapshot = await getDocs(teamQuery);
           allTransactionDocs.push(...teamSnapshot.docs);
         } catch (error) {
-          console.warn(`Error loading team ${teamId} transactions:`, error);
-          // Continue with other teams even if one fails
+          console.warn(`Compound query failed for team ${teamId}, trying fallback:`, error);
+          
+          // Fallback: Use simple query without orderBy if compound query fails
+          try {
+            let fallbackQuery = query(
+              collection(db, 'transactions'),
+              where('teamId', '==', teamId),
+              limit(2000)
+            );
+
+            const fallbackSnapshot = await getDocs(fallbackQuery);
+            allTransactionDocs.push(...fallbackSnapshot.docs);
+            console.log(`✅ Fallback query succeeded for team ${teamId}`);
+          } catch (fallbackError) {
+            console.error(`Both queries failed for team ${teamId}:`, fallbackError);
+            // Continue with other teams
+          }
         }
       }
 
-      // Sort all documents by createdAt on client side
-      allTransactionDocs.sort((a, b) => {
-        const aTime = a.data().createdAt?.toDate?.() || new Date(a.data().createdAt);
-        const bTime = b.data().createdAt?.toDate?.() || new Date(b.data().createdAt);
-        return bTime.getTime() - aTime.getTime();
-      });
-
+      // Data is already sorted by createdAt desc from query
       const teamsSnapshot = await getDocs(collection(db, 'teams'));
       
       performanceRef.current.totalQueryTime += performance.now() - queryStartTime;
@@ -225,51 +240,62 @@ export default function BotTransactionsPage() {
         teamsMap.set(doc.id, doc.data());
       });
 
-      // Process all documents
-      const allTransactions = allTransactionDocs.map(doc => {
-        const data = doc.data() as any;
-        
-        // Get team info from map
-        let teamName = 'ไม่ระบุทีม';
-        if (data.teamId && teamsMap.has(data.teamId)) {
-          const teamData = teamsMap.get(data.teamId);
-          teamName = teamData.name || `ทีม ${data.teamId.substring(0, 8)}`;
-        } else if (data.teamId) {
-          teamName = `ทีม ${data.teamId.substring(0, 8)}`;
-        }
-        
-        return {
-          id: doc.id,
-          ...data,
-          teamName
-        } as BotTransaction;
-      });
+      // Process all documents and filter for bot transactions
+      const allTransactions = allTransactionDocs
+        .filter(doc => {
+          const data = doc.data();
+          return data.type === 'withdraw' && data.createdBy === 'api';
+        })
+        .map(doc => {
+          const data = doc.data() as any;
+          
+          // Get team info from map
+          let teamName = 'ไม่ระบุทีม';
+          if (data.teamId && teamsMap.has(data.teamId)) {
+            const teamData = teamsMap.get(data.teamId);
+            teamName = teamData.name || `ทีม ${data.teamId.substring(0, 8)}`;
+          } else if (data.teamId) {
+            teamName = `ทีม ${data.teamId.substring(0, 8)}`;
+          }
+          
+          return {
+            id: doc.id,
+            ...data,
+            teamName
+          } as BotTransaction;
+        });
 
-      // Filter for bot transactions on client-side since we simplified the query
-      const botTransactions = allTransactions.filter(record => 
-        record.type === 'withdraw' && 
-        record.createdBy === 'api'
-      );
+      // Sort all transactions by createdAt desc
+      allTransactions.sort((a, b) => {
+        const aTime = a.createdAt?.toDate?.() || new Date(a.createdAt);
+        const bTime = b.createdAt?.toDate?.() || new Date(b.createdAt);
+        return bTime.getTime() - aTime.getTime();
+      });
 
       // Filter based on user role and permissions
       let filteredRecords: BotTransaction[];
       
       if (userProfile.role === 'admin') {
-        filteredRecords = botTransactions.filter(record => 
+        filteredRecords = allTransactions.filter(record => 
           record.teamId && userTeamIds.includes(record.teamId)
         );
       } else if (userProfile.role === 'manager') {
-        filteredRecords = botTransactions.filter(record => 
+        filteredRecords = allTransactions.filter(record => 
           record.teamId && userTeamIds.includes(record.teamId)
         );
       } else {
-        filteredRecords = botTransactions.filter(record => 
+        filteredRecords = allTransactions.filter(record => 
           record.teamId && userTeamIds.includes(record.teamId)
         );
       }
 
       // Store all filtered records for client-side pagination
       setTransactions(filteredRecords);
+
+      // Check if we potentially have more data (if we hit the limit, there might be more)
+      const totalDocsReceived = allTransactionDocs.length;
+      const maxPossibleDocs = userTeamIds.length * 2000;
+      setHasMoreData(totalDocsReceived >= maxPossibleDocs * 0.9); // If we got 90% of max, likely more available
 
       setLastUpdated(new Date());
       performanceRef.current.cacheMisses++;
@@ -311,6 +337,105 @@ export default function BotTransactionsPage() {
   const handleRefresh = () => {
     loadTransactions(true);
   };
+
+  // Load more data function
+  const loadMoreData = useCallback(async () => {
+    if (!user || !userProfile || teamsLoading || loadingMore || !hasMoreData) {
+      return;
+    }
+
+    try {
+      setLoadingMore(true);
+      const userTeamIds = teams.map(team => team.id);
+      
+      let additionalDocs: any[] = [];
+      
+      // Get the last transaction's timestamp for cursor-based pagination
+      const lastTransaction = transactions[transactions.length - 1];
+      const lastTimestamp = lastTransaction?.createdAt;
+
+      for (const teamId of userTeamIds) {
+        try {
+          // Try compound query with composite index first
+          let teamQuery = query(
+            collection(db, 'transactions'),
+            where('teamId', '==', teamId),
+            orderBy('createdAt', 'desc'),
+            startAfter(lastTimestamp),
+            limit(1000)
+          );
+
+          const teamSnapshot = await getDocs(teamQuery);
+          additionalDocs.push(...teamSnapshot.docs);
+        } catch (error) {
+          console.warn(`Compound query failed for team ${teamId} loadMore, trying fallback:`, error);
+          
+          // Fallback: Use simple query without orderBy and startAfter
+          try {
+            let fallbackQuery = query(
+              collection(db, 'transactions'),
+              where('teamId', '==', teamId),
+              limit(1000)
+            );
+
+            const fallbackSnapshot = await getDocs(fallbackQuery);
+            // Filter out documents we already have (basic deduplication)
+            const newDocs = fallbackSnapshot.docs.filter(doc => 
+              !transactions.some(existing => existing.id === doc.id)
+            );
+            additionalDocs.push(...newDocs);
+            console.log(`✅ Fallback loadMore query succeeded for team ${teamId}`);
+          } catch (fallbackError) {
+            console.error(`Both loadMore queries failed for team ${teamId}:`, fallbackError);
+          }
+        }
+      }
+
+      // Filter and process additional data
+      const additionalTransactions = additionalDocs
+        .filter(doc => {
+          const data = doc.data();
+          return data.type === 'withdraw' && data.createdBy === 'api';
+        })
+        .map(doc => {
+          const data = doc.data() as any;
+          
+          // Get team name
+          const team = teams.find(t => t.id === data.teamId);
+          const teamName = team?.name || `ทีม ${data.teamId?.substring(0, 8) || 'ไม่ระบุ'}`;
+          
+          return {
+            id: doc.id,
+            ...data,
+            teamName
+          } as BotTransaction;
+        });
+
+      // Sort new data
+      additionalTransactions.sort((a, b) => {
+        const aTime = a.createdAt?.toDate?.() || new Date(a.createdAt);
+        const bTime = b.createdAt?.toDate?.() || new Date(b.createdAt);
+        return bTime.getTime() - aTime.getTime();
+      });
+
+      // Filter based on user permissions
+      const filteredAdditionalRecords = additionalTransactions.filter(record => 
+        record.teamId && userTeamIds.includes(record.teamId)
+      );
+
+      // Append to existing transactions
+      setTransactions(prev => [...prev, ...filteredAdditionalRecords]);
+      
+      // Check if we have more data (if we got less than requested, we've reached the end)
+      setHasMoreData(additionalDocs.length >= userTeamIds.length * 1000);
+
+    } catch (error) {
+      console.error('Error loading more data:', error);
+      toast.error('ไม่สามารถโหลดข้อมูลเพิ่มเติมได้');
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [user, userProfile, teams, teamsLoading, transactions, loadingMore, hasMoreData]);
 
   const openManageModal = (transaction: BotTransaction) => {
     setSelectedTransaction(transaction);
@@ -1031,11 +1156,40 @@ export default function BotTransactionsPage() {
                 </table>
               </div>
 
+              {/* Load More Button */}
+              {hasMoreData && !loading && transactions.length > 0 && (
+                <div className="mt-6 text-center">
+                  <button
+                    onClick={loadMoreData}
+                    disabled={loadingMore}
+                    className="inline-flex items-center gap-2 px-6 py-3 text-sm font-medium text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/40 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {loadingMore ? (
+                      <>
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                        กำลังโหลดข้อมูลเพิ่มเติม...
+                      </>
+                    ) : (
+                      <>
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                        </svg>
+                        โหลดข้อมูลเพิ่มเติม
+                      </>
+                    )}
+                  </button>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                    กำลังแสดง {transactions.length} รายการ - คลิกเพื่อดูเพิ่มเติม
+                  </p>
+                </div>
+              )}
+
               {/* Pagination */}
               {Math.ceil(filteredTransactions.length / itemsPerPage) > 1 && (
                 <div className="mt-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                   <div className="text-sm text-gray-700 dark:text-gray-300">
                     แสดง {((currentPage - 1) * itemsPerPage) + 1} ถึง {Math.min(currentPage * itemsPerPage, filteredTransactions.length)} จาก {filteredTransactions.length} รายการ
+                    {hasMoreData && <span className="text-blue-600 dark:text-blue-400"> (มีข้อมูลเพิ่มเติม)</span>}
                   </div>
                   
                   <div className="flex items-center space-x-2">
