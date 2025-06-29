@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { collection, query, where, getDocs, getDoc, limit, updateDoc, doc, serverTimestamp } from 'firebase/firestore';
+import { collection, query, where, getDocs, getDoc, limit, updateDoc, doc, serverTimestamp, addDoc, runTransaction } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 
 export async function GET(request: NextRequest) {
@@ -40,7 +40,7 @@ export async function GET(request: NextRequest) {
 
       const teamDoc = teamsSnapshot.docs[0];
       const teamId = teamDoc.id;
-      const teamData = teamDoc.data();
+      const teamData = teamDoc.data() as any;
       const teamName = teamData.name;
       const teamUrl = teamData.url || '';
       const teamApiKey = teamData.apiKey || '';
@@ -56,16 +56,29 @@ export async function GET(request: NextRequest) {
       // Filter for pending transactions on client side
       const pendingTransactions = transactionsSnapshot.docs
         .filter(doc => {
-          const data = doc.data();
+          const data = doc.data() as any;
           const status = data.status;
           return status === 'รอโอน';
         })
         .map(doc => ({
           doc: doc,
-          data: doc.data(),
+          data: doc.data() as any,
           createdAt: doc.data().createdAt?.toDate?.() || new Date(doc.data().createdAt)
         }));
       
+      // Create audit log for request
+      await addDoc(collection(db, 'audit_logs'), {
+        action: 'pending_transactions_request',
+        apiEndpoint: '/api/team/pending-transactions',
+        teamId: teamId,
+        teamName: teamName,
+        pendingCount: pendingTransactions.length,
+        timestamp: serverTimestamp(),
+        success: true,
+        userAgent: request.headers.get('User-Agent') || 'Unknown',
+        ip: request.headers.get('X-Forwarded-For') || 'Unknown'
+      });
+
       if (pendingTransactions.length === 0) {
         return NextResponse.json({
           success: true,
@@ -97,7 +110,7 @@ export async function GET(request: NextRequest) {
             const websiteDoc = await getDoc(websiteDocRef);
             
             if (websiteDoc.exists()) {
-              const websiteData = websiteDoc.data();
+              const websiteData = websiteDoc.data() as any;
               websiteUrl = websiteData.url || '';
               websiteApiKey = websiteData.apiKey || '';
             } else {
@@ -109,7 +122,7 @@ export async function GET(request: NextRequest) {
               
               const websiteSnapshot = await getDocs(websiteQuery);
               if (!websiteSnapshot.empty) {
-                const websiteData = websiteSnapshot.docs[0].data();
+                const websiteData = websiteSnapshot.docs[0].data() as any;
                 websiteUrl = websiteData.url || '';
                 websiteApiKey = websiteData.apiKey || '';
               }
@@ -122,34 +135,79 @@ export async function GET(request: NextRequest) {
         }
       }
 
-      // Update status to "กำลังโอน"
-      await updateDoc(doc(db, 'transactions', transactionDoc.id), {
-        status: 'กำลังโอน',
-        updatedAt: serverTimestamp()
+      // Use atomic transaction to update status safely
+      const updateResult = await runTransaction(db, async (transaction) => {
+        // Re-read the transaction document to ensure it's still pending
+        const transactionDocRef = doc(db, 'transactions', transactionDoc.id);
+        const currentTransactionDoc = await transaction.get(transactionDocRef);
+        
+        if (!currentTransactionDoc.exists()) {
+          throw new Error('Transaction document no longer exists');
+        }
+        
+        const currentTransactionData = currentTransactionDoc.data() as any;
+        
+        // Double-check that it's still pending (prevent race conditions)
+        if (currentTransactionData.status !== 'รอโอน') {
+          throw new Error(`Transaction status changed to "${currentTransactionData.status}". Cannot update.`);
+        }
+        
+        // Update status to "กำลังโอน"
+        transaction.update(transactionDocRef, {
+          status: 'กำลังโอน',
+          updatedAt: serverTimestamp(),
+          processingStartedAt: serverTimestamp()
+        });
+
+        // Create audit log for status update
+        const auditLogData = {
+          action: 'transaction_status_change',
+          apiEndpoint: '/api/team/pending-transactions',
+          teamId: teamId,
+          teamName: teamName,
+          transactionId: transactionDoc.id,
+          originalTransactionId: transactionData.transactionId,
+          customerUsername: transactionData.customerUsername,
+          websiteId: transactionData.websiteId,
+          websiteName: transactionData.websiteName,
+          amount: transactionData.amount,
+          oldStatus: 'รอโอน',
+          newStatus: 'กำลังโอน',
+          timestamp: serverTimestamp(),
+          success: true,
+          userAgent: request.headers.get('User-Agent') || 'Unknown',
+          ip: request.headers.get('X-Forwarded-For') || 'Unknown'
+        };
+
+        const auditRef = doc(collection(db, 'audit_logs'));
+        transaction.set(auditRef, auditLogData);
+
+        return currentTransactionData;
       });
 
       // Format transaction data with updated status
       const transaction = {
         id: transactionDoc.id,
-        transactionId: transactionData.transactionId || '',
-        customerUsername: transactionData.customerUsername || '',
-        websiteName: transactionData.websiteName || '',
-        websiteId: transactionData.websiteId || '',
-        bankName: transactionData.bankName || '',
-        accountNumber: transactionData.accountNumber || '',
-        realName: transactionData.realName || '',
-        amount: transactionData.amount || 0,
-        balanceBefore: transactionData.balanceBefore || 0,
-        balanceAfter: transactionData.balanceAfter || 0,
+        transactionId: updateResult.transactionId || '',
+        customerUsername: updateResult.customerUsername || '',
+        websiteName: updateResult.websiteName || '',
+        websiteId: updateResult.websiteId || '',
+        bankName: updateResult.bankName || '',
+        accountNumber: updateResult.accountNumber || '',
+        realName: updateResult.realName || '',
+        amount: updateResult.amount || 0,
+        balanceBefore: updateResult.balanceBefore || 0,
+        balanceAfter: updateResult.balanceAfter || 0,
         status: 'กำลังโอน', // Updated status
-        type: transactionData.type || '',
-        note: transactionData.note || null,
-        createdAt: transactionData.createdAt?.toDate?.()?.toISOString() || null,
+        type: updateResult.type || '',
+        note: updateResult.note || null,
+        createdAt: updateResult.createdAt?.toDate?.()?.toISOString() || null,
         updatedAt: new Date().toISOString(), // Current timestamp
-        createdBy: transactionData.createdBy || '',
-        lastModifiedBy: transactionData.lastModifiedBy || null,
-        lastModifiedByEmail: transactionData.lastModifiedByEmail || null,
-        lastModifiedAt: transactionData.lastModifiedAt?.toDate?.()?.toISOString() || null
+        processingStartedAt: new Date().toISOString(),
+        createdBy: updateResult.createdBy || '',
+        lastModifiedBy: updateResult.lastModifiedBy || null,
+        lastModifiedByEmail: updateResult.lastModifiedByEmail || null,
+        lastModifiedAt: updateResult.lastModifiedAt?.toDate?.()?.toISOString() || null
       };
       
       return NextResponse.json({
@@ -159,11 +217,29 @@ export async function GET(request: NextRequest) {
         url: websiteUrl,
         apiKey: websiteApiKey,
         message: 'Transaction retrieved and status updated to "กำลังโอน"',
-        transaction: transaction
+        transaction: transaction,
+        totalPendingBefore: pendingTransactions.length,
+        totalPendingAfter: pendingTransactions.length - 1
       });
 
     } catch (dbError) {
       console.error('Database error:', dbError);
+      
+      // Create error audit log
+      try {
+        await addDoc(collection(db, 'audit_logs'), {
+          action: 'pending_transactions_request_failed',
+          apiEndpoint: '/api/team/pending-transactions',
+          error: dbError instanceof Error ? dbError.message : 'Unknown database error',
+          timestamp: serverTimestamp(),
+          success: false,
+          userAgent: request.headers.get('User-Agent') || 'Unknown',
+          ip: request.headers.get('X-Forwarded-For') || 'Unknown'
+        });
+      } catch (auditError) {
+        console.error('Failed to create error audit log:', auditError);
+      }
+
       return NextResponse.json(
         { 
           success: false,

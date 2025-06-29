@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { collection, query, where, getDocs, getDoc, updateDoc, doc, serverTimestamp } from 'firebase/firestore';
+import { collection, query, where, getDocs, getDoc, updateDoc, doc, serverTimestamp, runTransaction, addDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 
 export async function POST(request: NextRequest) {
@@ -64,140 +64,187 @@ export async function POST(request: NextRequest) {
 
       const teamDoc = teamsSnapshot.docs[0];
       const teamId = teamDoc.id;
-      const teamData = teamDoc.data();
+      const teamData = teamDoc.data() as any;
       const teamName = teamData.name;
 
-      // Find transaction by document ID
-      try {
+      // Use Firestore transaction for atomic operations
+      const result = await runTransaction(db, async (transaction) => {
+        // Get transaction document
         const transactionDocRef = doc(db, 'transactions', requestData.id);
-        const transactionDoc = await getDoc(transactionDocRef);
+        const transactionDoc = await transaction.get(transactionDocRef);
         
         if (!transactionDoc.exists()) {
-          return NextResponse.json(
-            { 
-              success: false,
-              error: 'Transaction not found' 
-            },
-            { status: 404 }
-          );
+          throw new Error('Transaction not found');
         }
 
-        const transactionData = transactionDoc.data();
+        const transactionData = transactionDoc.data() as any;
         
         // Check if transaction belongs to the authenticated team
         if (transactionData.teamId !== teamId) {
-          return NextResponse.json(
-            { 
-              success: false,
-              error: 'Transaction not found in your team' 
-            },
-            { status: 404 }
-          );
+          throw new Error('Transaction not found in your team');
         }
-      } catch (docError) {
-        console.error('Error getting transaction document:', docError);
-        return NextResponse.json(
-          { 
-            success: false,
-            error: 'Failed to retrieve transaction',
-            details: docError instanceof Error ? docError.message : 'Unknown error'
-          },
-          { status: 500 }
-        );
-      }
-      
-      // Get transaction data (we know it exists from the try block above)
-      const transactionDocRef = doc(db, 'transactions', requestData.id);
-      const transactionDoc = await getDoc(transactionDocRef);
-      const transactionData = transactionDoc.data()!;
-      
-      // Check if transaction is in a state that can be updated
-      if (!['กำลังโอน', 'รอโอน'].includes(transactionData.status)) {
-        return NextResponse.json(
-          { 
-            success: false,
-            error: `Transaction cannot be updated. Current status: ${transactionData.status}` 
-          },
-          { status: 400 }
-        );
-      }
 
-      // Handle credit refund for failed transactions
-      let websiteUpdated = false;
-      let refundAmount = 0;
-      let websiteName = '';
-      let currentWebsiteBalance = 0;
-      
-      if (requestData.status === 'ล้มเหลว' && transactionData.type === 'withdraw') {
-        if (transactionData.websiteId && transactionData.amount) {
-          try {
-            // Get website document
-            const websiteDocRef = doc(db, 'websites', transactionData.websiteId);
-            const websiteDoc = await getDoc(websiteDocRef);
-            
-            if (websiteDoc.exists()) {
-              const websiteData = websiteDoc.data();
-              const currentBalance = websiteData.balance || 0;
-              refundAmount = transactionData.amount;
-              const newBalance = currentBalance + refundAmount;
-              websiteName = websiteData.name || 'Unknown Website';
-              currentWebsiteBalance = newBalance; // Store the new balance after refund
+        // Check if transaction is in a state that can be updated
+        if (!['กำลังโอน', 'รอโอน'].includes(transactionData.status)) {
+          throw new Error(`Transaction cannot be updated. Current status: ${transactionData.status}`);
+        }
+
+        // Check if transaction is already completed (idempotency check)
+        if (['สำเร็จ', 'ล้มเหลว'].includes(transactionData.status)) {
+          return {
+            alreadyCompleted: true,
+            transactionData: transactionData,
+            websiteName: '',
+            currentWebsiteBalance: 0,
+            refundAmount: 0,
+            websiteUpdated: false
+          };
+        }
+
+        // Handle credit refund for failed transactions
+        let websiteUpdated = false;
+        let refundAmount = 0;
+        let websiteName = '';
+        let currentWebsiteBalance = 0;
+        
+        if (requestData.status === 'ล้มเหลว' && transactionData.type === 'withdraw') {
+          if (transactionData.websiteId && transactionData.amount) {
+            // Validate that the money was actually deducted
+            if (transactionData.balanceBefore !== undefined && 
+                transactionData.balanceAfter !== undefined && 
+                transactionData.balanceBefore >= transactionData.balanceAfter) {
               
-              // Update website balance
-              await updateDoc(websiteDocRef, {
-                balance: newBalance,
-                updatedAt: serverTimestamp()
-              });
+              const expectedDeduction = transactionData.balanceBefore - transactionData.balanceAfter;
               
-              websiteUpdated = true;
+              if (expectedDeduction === transactionData.amount) {
+                // Get website document within transaction
+                const websiteDocRef = doc(db, 'websites', transactionData.websiteId);
+                const websiteDoc = await transaction.get(websiteDocRef);
+                
+                if (websiteDoc.exists()) {
+                  const websiteData = websiteDoc.data() as any;
+                  const currentBalance = websiteData.balance || 0;
+                  refundAmount = transactionData.amount;
+                  const newBalance = currentBalance + refundAmount;
+                  websiteName = websiteData.name || 'Unknown Website';
+                  currentWebsiteBalance = newBalance;
+                  
+                  // Update website balance
+                  transaction.update(websiteDocRef, {
+                    balance: newBalance,
+                    updatedAt: serverTimestamp()
+                  });
+                  
+                  websiteUpdated = true;
+                } else {
+                  throw new Error('Website not found for refund');
+                }
+              } else {
+                throw new Error(`Refund validation failed. Expected deduction: ${expectedDeduction}, Actual: ${transactionData.amount}`);
+              }
+            } else {
+              throw new Error('Invalid transaction data for refund. Missing balance information.');
             }
-          } catch (refundError) {
-            console.error('Error processing credit refund:', refundError);
-            return NextResponse.json(
-              { 
-                success: false,
-                error: 'Failed to process credit refund',
-                details: refundError instanceof Error ? refundError.message : 'Unknown refund error'
-              },
-              { status: 500 }
-            );
+          } else {
+            throw new Error('Missing website ID or amount for refund');
+          }
+        } else {
+          // For non-refund cases, get current website balance for display
+          if (transactionData.websiteId) {
+            try {
+              const websiteDocRef = doc(db, 'websites', transactionData.websiteId);
+              const websiteDoc = await transaction.get(websiteDocRef);
+              
+              if (websiteDoc.exists()) {
+                const websiteData = websiteDoc.data() as any;
+                currentWebsiteBalance = websiteData.balance || 0;
+                websiteName = websiteData.name || 'Unknown Website';
+              }
+            } catch (balanceError) {
+              // Continue without balance info - silent fail
+            }
           }
         }
-      } else {
-        // For non-refund cases, get current website balance for display
-        if (transactionData.websiteId) {
-          try {
-            const websiteDocRef = doc(db, 'websites', transactionData.websiteId);
-            const websiteDoc = await getDoc(websiteDocRef);
-            
-            if (websiteDoc.exists()) {
-              const websiteData = websiteDoc.data();
-              currentWebsiteBalance = websiteData.balance || 0;
-              websiteName = websiteData.name || 'Unknown Website';
-            }
-          } catch (balanceError) {
-            // Continue without balance info - silent fail
+
+        // Update transaction status
+        const updateData: any = {
+          status: requestData.status,
+          updatedAt: serverTimestamp()
+        };
+
+        // Add note if provided
+        if (requestData.note) {
+          updateData.note = requestData.note;
+        }
+
+        // Add completion timestamp for successful transactions
+        if (requestData.status === 'สำเร็จ') {
+          updateData.completedAt = serverTimestamp();
+        } else if (requestData.status === 'ล้มเหลว') {
+          updateData.failedAt = serverTimestamp();
+          if (websiteUpdated) {
+            updateData.refundedAt = serverTimestamp();
+            updateData.refundAmount = refundAmount;
           }
         }
+
+        transaction.update(transactionDocRef, updateData);
+
+        // Create audit log
+        const auditLogData = {
+          action: 'transaction_status_update',
+          apiEndpoint: '/api/team/update-transaction',
+          teamId: teamId,
+          teamName: teamName,
+          transactionId: requestData.id,
+          originalTransactionId: transactionData.transactionId,
+          customerUsername: transactionData.customerUsername,
+          websiteId: transactionData.websiteId,
+          websiteName: websiteName,
+          oldStatus: transactionData.status,
+          newStatus: requestData.status,
+          amount: transactionData.amount,
+          refundAmount: websiteUpdated ? refundAmount : 0,
+          websiteUpdated: websiteUpdated,
+          note: requestData.note || null,
+          timestamp: serverTimestamp(),
+          success: true,
+          userAgent: request.headers.get('User-Agent') || 'Unknown',
+          ip: request.headers.get('X-Forwarded-For') || 'Unknown'
+        };
+
+        const auditRef = doc(collection(db, 'audit_logs'));
+        transaction.set(auditRef, auditLogData);
+
+        return {
+          alreadyCompleted: false,
+          transactionData: transactionData,
+          websiteName: websiteName,
+          currentWebsiteBalance: currentWebsiteBalance,
+          refundAmount: refundAmount,
+          websiteUpdated: websiteUpdated
+        };
+      });
+
+      // Handle idempotent response for already completed transactions
+      if (result.alreadyCompleted) {
+        return NextResponse.json({
+          success: true,
+          message: `Transaction already completed with status "${result.transactionData.status}" (idempotent response)`,
+          teamId: teamId,
+          teamName: teamName,
+          id: requestData.id,
+          transactionId: result.transactionData.transactionId || '',
+          oldStatus: result.transactionData.status,
+          newStatus: result.transactionData.status,
+          website: {
+            id: result.transactionData.websiteId || '',
+            name: result.websiteName || 'Unknown Website',
+            currentBalance: result.currentWebsiteBalance
+          },
+          idempotent: true
+        });
       }
-
-      // Update transaction status
-      const updateData: any = {
-        status: requestData.status,
-        updatedAt: serverTimestamp()
-      };
-
-      // Add note if provided
-      if (requestData.note) {
-        updateData.note = requestData.note;
-      }
-
-      // Add completion timestamp for successful transactions
-      if (requestData.status === 'สำเร็จ') {
-        updateData.completedAt = serverTimestamp();
-      }
-
-      await updateDoc(doc(db, 'transactions', requestData.id), updateData);
 
       // Prepare response
       const response: any = {
@@ -205,24 +252,25 @@ export async function POST(request: NextRequest) {
         teamId: teamId,
         teamName: teamName,
         id: requestData.id,
-        transactionId: transactionData.transactionId || '',
-        oldStatus: transactionData.status,
+        transactionId: result.transactionData.transactionId || '',
+        oldStatus: result.transactionData.status,
         newStatus: requestData.status,
         message: `Transaction status updated to "${requestData.status}"`,
         website: {
-          id: transactionData.websiteId || '',
-          name: websiteName || 'Unknown Website',
-          currentBalance: currentWebsiteBalance
+          id: result.transactionData.websiteId || '',
+          name: result.websiteName || 'Unknown Website',
+          currentBalance: result.currentWebsiteBalance
         }
       };
 
       // Add refund information if applicable
-      if (websiteUpdated) {
+      if (result.websiteUpdated) {
         response.creditRefund = {
-          websiteId: transactionData.websiteId,
-          websiteName: websiteName,
-          refundAmount: refundAmount,
-          message: `Credit refunded: ${refundAmount} THB`
+          websiteId: result.transactionData.websiteId,
+          websiteName: result.websiteName,
+          refundAmount: result.refundAmount,
+          message: `Credit refunded: ${result.refundAmount} THB`,
+          balanceAfterRefund: result.currentWebsiteBalance
         };
       }
       
@@ -230,6 +278,24 @@ export async function POST(request: NextRequest) {
 
     } catch (dbError) {
       console.error('Database error:', dbError);
+      
+      // Create error audit log
+      try {
+        await addDoc(collection(db, 'audit_logs'), {
+          action: 'transaction_status_update_failed',
+          apiEndpoint: '/api/team/update-transaction',
+          error: dbError instanceof Error ? dbError.message : 'Unknown database error',
+          transactionId: requestData.id,
+          requestedStatus: requestData.status,
+          timestamp: serverTimestamp(),
+          success: false,
+          userAgent: request.headers.get('User-Agent') || 'Unknown',
+          ip: request.headers.get('X-Forwarded-For') || 'Unknown'
+        });
+      } catch (auditError) {
+        console.error('Failed to create error audit log:', auditError);
+      }
+
       return NextResponse.json(
         { 
           success: false,
