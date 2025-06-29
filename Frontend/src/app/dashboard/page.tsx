@@ -71,6 +71,14 @@ export default function Dashboard() {
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
   const [isRealTimeActive, setIsRealTimeActive] = useState(false);
 
+  // Animation states for updated values
+  const [animationState, setAnimationState] = useState({
+    todayTopup: false,
+    todayWithdraw: false,
+    totalBalance: false,
+    websiteBalances: {} as Record<string, boolean>
+  });
+
   // Website Management State
   const [websites, setWebsites] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -138,6 +146,41 @@ export default function Dashboard() {
 
   let websitesCache: WebsitesCacheData | null = null;
   const WEBSITES_CACHE_DURATION = 60000; // 1 minute
+
+  // Animation helper function
+  const triggerAnimation = (type: 'todayTopup' | 'todayWithdraw' | 'totalBalance', websiteId?: string) => {
+    if (websiteId) {
+      setAnimationState(prev => ({
+        ...prev,
+        websiteBalances: {
+          ...prev.websiteBalances,
+          [websiteId]: true
+        }
+      }));
+      
+      setTimeout(() => {
+        setAnimationState(prev => ({
+          ...prev,
+          websiteBalances: {
+            ...prev.websiteBalances,
+            [websiteId]: false
+          }
+        }));
+      }, 2000);
+    } else {
+      setAnimationState(prev => ({
+        ...prev,
+        [type]: true
+      }));
+      
+      setTimeout(() => {
+        setAnimationState(prev => ({
+          ...prev,
+          [type]: false
+        }));
+      }, 2000);
+    }
+  };
 
   // Optimized website loading with caching
   const loadWebsitesOptimized = useCallback(async (forceRefresh = false) => {
@@ -413,8 +456,33 @@ export default function Dashboard() {
           });
 
           if (relevantChanges.length > 0) {
-            // Reload data to get the updated/new records
-            loadWebsitesOptimized(true);
+            // Update data directly without full reload
+            setWebsites(prev => {
+              let updated = [...prev];
+              
+              relevantChanges.forEach(change => {
+                const data = { id: change.doc.id, ...change.doc.data() };
+                
+                if (change.type === 'added') {
+                  // Add new website if not already exists
+                  if (!updated.find(w => w.id === data.id)) {
+                    updated.push(data);
+                  }
+                } else if (change.type === 'modified') {
+                  // Update existing website
+                  const index = updated.findIndex(w => w.id === data.id);
+                  if (index !== -1) {
+                    updated[index] = data;
+                  }
+                } else if (change.type === 'removed') {
+                  // Remove website
+                  updated = updated.filter(w => w.id !== data.id);
+                }
+              });
+              
+              return updated;
+            });
+            
             setLastUpdated(new Date());
             
             // Show notification for different types of changes
@@ -493,8 +561,44 @@ export default function Dashboard() {
           });
 
           if (relevantNewRecords.length > 0) {
-            // Reload today's topup amount to get the updated data
-            loadTodayTopupAmount();
+            // Update today's topup amount directly without reloading all data
+            const today = new Date().toDateString();
+            let newTodayAmount = 0;
+            const newWebsiteTopupMap: Record<string, number> = {};
+            
+            relevantNewRecords.forEach(change => {
+              const data = change.doc.data();
+              const recordDate = new Date(data.timestamp);
+              
+              // Check if record is from today
+              if (recordDate.toDateString() === today) {
+                const amount = data.amount || 0;
+                const websiteId = data.websiteId;
+                
+                newTodayAmount += amount;
+                
+                // Track per website
+                if (websiteId) {
+                  newWebsiteTopupMap[websiteId] = (newWebsiteTopupMap[websiteId] || 0) + amount;
+                }
+              }
+            });
+            
+                         if (newTodayAmount > 0) {
+               // Add to existing amounts
+               setTodayTopupAmount(prev => prev + newTodayAmount);
+               setTodayTopupByWebsite(prev => {
+                 const updated = { ...prev };
+                 Object.entries(newWebsiteTopupMap).forEach(([websiteId, amount]) => {
+                   updated[websiteId] = (updated[websiteId] || 0) + amount;
+                 });
+                 return updated;
+               });
+               
+               // Trigger animation for topup amount
+               triggerAnimation('todayTopup');
+             }
+            
             setLastUpdated(new Date());
             
             // Show notification
@@ -558,8 +662,44 @@ export default function Dashboard() {
           });
 
           if (relevantNewRecords.length > 0) {
-            // Reload today's withdraw amount to get the updated data
-            loadTodayWithdrawAmount();
+            // Update today's withdraw amount directly without reloading all data
+            const today = new Date().toDateString();
+            let newTodayAmount = 0;
+            const newWebsiteWithdrawMap: Record<string, number> = {};
+            
+            relevantNewRecords.forEach(change => {
+              const data = change.doc.data();
+              const recordDate = new Date(data.timestamp);
+              
+              // Check if record is from today
+              if (recordDate.toDateString() === today) {
+                const amount = data.amount || 0;
+                const websiteId = data.websiteId;
+                
+                newTodayAmount += amount;
+                
+                // Track per website
+                if (websiteId) {
+                  newWebsiteWithdrawMap[websiteId] = (newWebsiteWithdrawMap[websiteId] || 0) + amount;
+                }
+              }
+            });
+            
+                         if (newTodayAmount > 0) {
+               // Add to existing amounts
+               setTodayWithdrawAmount(prev => prev + newTodayAmount);
+               setTodayWithdrawByWebsite(prev => {
+                 const updated = { ...prev };
+                 Object.entries(newWebsiteWithdrawMap).forEach(([websiteId, amount]) => {
+                   updated[websiteId] = (updated[websiteId] || 0) + amount;
+                 });
+                 return updated;
+               });
+               
+               // Trigger animation for withdraw amount
+               triggerAnimation('todayWithdraw');
+             }
+            
             setLastUpdated(new Date());
             
             // Show notification
@@ -939,6 +1079,10 @@ export default function Dashboard() {
           : w
       ));
 
+      // Trigger animation for website balance and total balance
+      triggerAnimation('totalBalance');
+      triggerAnimation('todayTopup', topupConfirm.websiteId);
+
       // Update stats
       const totalBalance = websites.reduce((sum, site: any) => 
         site.id === topupConfirm.websiteId ? sum + newBalance : sum + (site.balance || 0), 0
@@ -1121,6 +1265,10 @@ export default function Dashboard() {
           : w
       ));
 
+      // Trigger animation for website balance and total balance
+      triggerAnimation('totalBalance');
+      triggerAnimation('todayWithdraw', withdrawConfirm.websiteId);
+
       // Update stats
       const totalBalance = websites.reduce((sum, site: any) => 
         site.id === withdrawConfirm.websiteId ? sum + newBalance : sum + (site.balance || 0), 0
@@ -1230,24 +1378,51 @@ export default function Dashboard() {
       title="แดชบอร์ด" 
       subtitle="ภาพรวมการเงินของคุณ"
     >
+      <style jsx>{`
+        .amount-update {
+          animation: redFadeOut 2s ease-out;
+        }
+        
+        @keyframes redFadeOut {
+          0% {
+            color: #ef4444 !important;
+            text-shadow: 0 0 10px rgba(239, 68, 68, 0.5);
+          }
+          50% {
+            color: #dc2626 !important;
+            text-shadow: 0 0 8px rgba(220, 38, 38, 0.4);
+          }
+          100% {
+            color: inherit;
+            text-shadow: none;
+          }
+        }
+      `}</style>
       <div className="space-y-6 lg:space-y-8">
         {/* Stats Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          {statCards.map((stat, index) => (
-            <div key={index} className={`bg-gradient-to-r ${stat.color} rounded-2xl p-6 text-white`}>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-white/80 text-sm font-medium">
-                    {stat.title}
-                  </p>
-                  <p className="text-2xl font-bold">
-                    {stat.value}
-                  </p>
+          {statCards.map((stat, index) => {
+            // Determine animation class based on card type
+            let animationClass = '';
+            if (index === 0 && animationState.totalBalance) animationClass = 'amount-update';
+            if (index === 1 && animationState.todayTopup) animationClass = 'amount-update';
+            
+            return (
+              <div key={index} className={`bg-gradient-to-r ${stat.color} rounded-2xl p-6 text-white`}>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-white/80 text-sm font-medium">
+                      {stat.title}
+                    </p>
+                    <p className={`text-2xl font-bold ${animationClass}`}>
+                      {stat.value}
+                    </p>
+                  </div>
+                  <stat.icon className="h-8 w-8 text-white/60" />
                 </div>
-                <stat.icon className="h-8 w-8 text-white/60" />
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         {/* Website Management Section */}
@@ -1450,10 +1625,10 @@ export default function Dashboard() {
                             </div>
                           </td>
                           <td className="py-4 px-4 text-center">
-                            <div className="font-bold text-green-600 dark:text-green-400">฿{(website.balance || 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                            <div className={`font-bold text-green-600 dark:text-green-400 ${animationState.websiteBalances[website.id] ? 'amount-update' : ''}`}>฿{(website.balance || 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
                           </td>
                           <td className="py-4 px-4 text-center">
-                            <div className="font-bold text-blue-600 dark:text-blue-400">฿{(todayTopupByWebsite[website.id] || 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                            <div className={`font-bold text-blue-600 dark:text-blue-400 ${animationState.websiteBalances[website.id] ? 'amount-update' : ''}`}>฿{(todayTopupByWebsite[website.id] || 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
                           </td>
                           <td className="py-4 px-4 text-center">
                             <div className="flex items-center justify-center">

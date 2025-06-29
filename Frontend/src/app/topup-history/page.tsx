@@ -507,11 +507,49 @@ export default function TopupHistory() {
           });
 
           if (relevantNewRecords.length > 0) {
+            // Process new records and add them to the list
+            const newTopupRecords = relevantNewRecords.map(change => {
+              const data = change.doc.data();
+              
+              // Get team info
+              let teamName = 'ไม่ระบุทีม';
+              if (data.teamId) {
+                const team = teams.find(t => t.id === data.teamId);
+                teamName = team?.name || `ทีม ${data.teamId.substring(0, 8)}`;
+              }
+              
+              return {
+                id: change.doc.id,
+                ...data,
+                teamName
+              } as TopupRecord;
+            });
+            
+            // Add new records to the beginning of the list (since they're newer)
+            setTopupHistory(prev => {
+              // Check for duplicates before adding
+              const newUniqueRecords = newTopupRecords.filter(newRecord => 
+                !prev.some(existing => existing.id === newRecord.id)
+              );
+              
+              if (newUniqueRecords.length > 0) {
+                // Sort by timestamp (newest first) and merge
+                const combined = [...newUniqueRecords, ...prev];
+                return combined.sort((a, b) => {
+                  const aTime = new Date(a.timestamp);
+                  const bTime = new Date(b.timestamp);
+                  return bTime.getTime() - aTime.getTime();
+                });
+              }
+              
+              return prev;
+            });
+            
             // Invalidate stats cache when new records arrive
             statsCache.current = { data: null, expiry: 0, userTeamIds: [] };
             
-            // Reload data to get the new records
-            loadTopupHistory(true, 1);
+            // Update last updated time
+            setLastUpdated(new Date());
             
             // Show notification
             toast.success(
