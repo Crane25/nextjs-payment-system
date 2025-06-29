@@ -135,6 +135,12 @@ export default function BotTransactionsPage() {
   const [hasMoreData, setHasMoreData] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   
+  // Always show all data
+  const showAllData = true;
+  
+  // Progress tracking
+  const [loadingProgress, setLoadingProgress] = useState({ current: 0, total: 0 });
+  
   // Use refs for values that shouldn't trigger re-renders
   const isLoadingRef = useRef(false);
   
@@ -173,9 +179,11 @@ export default function BotTransactionsPage() {
         setRefreshing(true);
         setTransactions([]);
         setCurrentPage(1);
-        setHasMoreData(true);
+        setHasMoreData(false); // No need for load more since we show all data
+        setLoadingProgress({ current: 0, total: 0 });
       } else {
         setLoading(true);
+        setLoadingProgress({ current: 0, total: 0 });
       }
 
       const userTeamIds = teams.map(team => team.id);
@@ -194,39 +202,83 @@ export default function BotTransactionsPage() {
       // Use optimized query to fetch bot transactions specifically
       const queryStartTime = performance.now();
       
-      let allTransactionDocs: any[] = [];
+            let allTransactionDocs: any[] = [];
+      setLoadingProgress({ current: 0, total: userTeamIds.length });
       
-      for (const teamId of userTeamIds) {
-        try {
-          // Try compound query with composite index first
-          let teamQuery = query(
-            collection(db, 'transactions'),
-            where('teamId', '==', teamId),
-            orderBy('createdAt', 'desc'),
-            limit(2000) // Increased limit to get more transactions
-          );
-
-          const teamSnapshot = await getDocs(teamQuery);
-          allTransactionDocs.push(...teamSnapshot.docs);
-        } catch (error) {
-          console.warn(`Compound query failed for team ${teamId}, trying fallback:`, error);
-          
-          // Fallback: Use simple query without orderBy if compound query fails
+      for (let teamIndex = 0; teamIndex < userTeamIds.length; teamIndex++) {
+        const teamId = userTeamIds[teamIndex];
+        setLoadingProgress({ current: teamIndex, total: userTeamIds.length });
+        let teamDocs: any[] = [];
+        let hasMore = true;
+        let lastDoc: any = null;
+        let batchCount = 0;
+        const maxBatches = showAllData ? 10 : 1; // Load up to 10 batches for all data (100,000 docs max)
+        
+        while (hasMore && batchCount < maxBatches) {
           try {
-            let fallbackQuery = query(
+            // Try compound query with composite index first
+            let teamQuery = query(
               collection(db, 'transactions'),
               where('teamId', '==', teamId),
-              limit(2000)
+              orderBy('createdAt', 'desc'),
+              limit(10000) // Always use max limit per batch
             );
 
-            const fallbackSnapshot = await getDocs(fallbackQuery);
-            allTransactionDocs.push(...fallbackSnapshot.docs);
-            console.log(`✅ Fallback query succeeded for team ${teamId}`);
-          } catch (fallbackError) {
-            console.error(`Both queries failed for team ${teamId}:`, fallbackError);
-            // Continue with other teams
+            // Add cursor for pagination if we have a last document
+            if (lastDoc) {
+              teamQuery = query(
+                collection(db, 'transactions'),
+                where('teamId', '==', teamId),
+                orderBy('createdAt', 'desc'),
+                startAfter(lastDoc),
+                limit(10000)
+              );
+            }
+
+            const teamSnapshot = await getDocs(teamQuery);
+            const docs = teamSnapshot.docs;
+            
+            if (docs.length === 0) {
+              hasMore = false;
+            } else {
+              teamDocs.push(...docs);
+              lastDoc = docs[docs.length - 1];
+              batchCount++;
+              
+              // If we got less than the limit, we've reached the end
+              if (docs.length < 10000) {
+                hasMore = false;
+              }
+              
+              // For limited mode, stop after first batch
+              if (!showAllData) {
+                hasMore = false;
+              }
+            }
+          } catch (error) {
+            console.warn(`Compound query failed for team ${teamId} batch ${batchCount}, trying fallback:`, error);
+            
+            // Fallback: Use simple query without orderBy if compound query fails
+            try {
+              let fallbackQuery = query(
+                collection(db, 'transactions'),
+                where('teamId', '==', teamId),
+                limit(10000)
+              );
+
+              const fallbackSnapshot = await getDocs(fallbackQuery);
+              teamDocs.push(...fallbackSnapshot.docs);
+              console.log(`✅ Fallback query succeeded for team ${teamId}`);
+              hasMore = false; // Don't try more batches for fallback
+            } catch (fallbackError) {
+              console.error(`Both queries failed for team ${teamId}:`, fallbackError);
+              hasMore = false;
+            }
           }
         }
+        
+        allTransactionDocs.push(...teamDocs);
+        console.log(`📊 Loaded ${teamDocs.length} documents for team ${teamId} in ${batchCount} batches`);
       }
 
       // Data is already sorted by createdAt desc from query
@@ -265,7 +317,7 @@ export default function BotTransactionsPage() {
           } as BotTransaction;
         });
 
-      // Sort all transactions by createdAt desc
+      // Sort all transactions by createdAt desc (newest first)
       allTransactions.sort((a, b) => {
         const aTime = a.createdAt?.toDate?.() || new Date(a.createdAt);
         const bTime = b.createdAt?.toDate?.() || new Date(b.createdAt);
@@ -292,10 +344,11 @@ export default function BotTransactionsPage() {
       // Store all filtered records for client-side pagination
       setTransactions(filteredRecords);
 
-      // Check if we potentially have more data (if we hit the limit, there might be more)
-      const totalDocsReceived = allTransactionDocs.length;
-      const maxPossibleDocs = userTeamIds.length * 2000;
-      setHasMoreData(totalDocsReceived >= maxPossibleDocs * 0.9); // If we got 90% of max, likely more available
+      // Reset loading progress
+      setLoadingProgress({ current: userTeamIds.length, total: userTeamIds.length });
+
+      // Since we're loading all available data in batches, no need for "load more"
+      setHasMoreData(false);
 
       setLastUpdated(new Date());
       performanceRef.current.cacheMisses++;
@@ -309,7 +362,7 @@ export default function BotTransactionsPage() {
       setRefreshing(false);
       isLoadingRef.current = false;
     }
-  }, [user, userProfile, teams, teamsLoading, itemsPerPage]);
+  }, [user, userProfile, teams, teamsLoading, itemsPerPage, showAllData]);
 
   // Removed loadMoreTransactions - now using pagination
 
@@ -436,6 +489,8 @@ export default function BotTransactionsPage() {
       setLoadingMore(false);
     }
   }, [user, userProfile, teams, teamsLoading, transactions, loadingMore, hasMoreData]);
+
+  // Remove load all data function since we always show all data
 
   const openManageModal = (transaction: BotTransaction) => {
     setSelectedTransaction(transaction);
@@ -613,7 +668,8 @@ export default function BotTransactionsPage() {
       month: '2-digit',
       day: '2-digit',
       hour: '2-digit',
-      minute: '2-digit'
+      minute: '2-digit',
+      second: '2-digit'
     });
   };
 
@@ -667,7 +723,7 @@ export default function BotTransactionsPage() {
       return matchesSearch && matchesStatus && matchesTeam;
     });
 
-    // Sort by date only (newest first) - back to original sorting
+    // Sort by created date (newest first) - รายการที่สร้างล่าสุดอยู่ด้านบน
     filtered.sort((a, b) => {
       const aTime = a.createdAt?.toDate?.() || new Date(a.createdAt);
       const bTime = b.createdAt?.toDate?.() || new Date(b.createdAt);
@@ -789,11 +845,16 @@ export default function BotTransactionsPage() {
               <div>
                 <div className="flex items-center gap-1 mb-1">
                   <span className="text-lg">💰</span>
-                  <p className="text-purple-100 text-sm font-medium">ยอดรวม</p>
+                  <p className="text-purple-100 text-sm font-medium">
+                    ยอดรวมทั้งหมด
+                  </p>
                 </div>
-                <p className="text-xl font-bold">
-                  ฿{formatAmount(transactions.reduce((sum, t) => sum + t.amount, 0))}
-                </p>
+                                  <p className="text-xl font-bold">
+                    ฿{formatAmount(transactions.reduce((sum, t) => sum + t.amount, 0))}
+                  </p>
+                  <p className="text-xs text-purple-200 mt-1">
+                    จาก {transactions.length} รายการ
+                  </p>
               </div>
             </div>
           </div>
@@ -938,10 +999,12 @@ export default function BotTransactionsPage() {
                     </svg>
                   </div>
                   <div>
-                    <h3 className="text-xl font-bold text-gray-900 dark:text-white">ธุรกรรม Bot API</h3>
+                    <h3 className="text-xl font-bold text-gray-900 dark:text-white">
+                      ธุรกรรม Bot API - ข้อมูลทั้งหมด (สูงสุด 100,000 รายการ)
+                    </h3>
                     <div className="flex items-center gap-2">
                       <p className="text-sm text-gray-600 dark:text-gray-400">
-                        รายการธุรกรรมการถอนเงินที่สร้างผ่าน API
+                        รายการธุรกรรมการถอนเงินที่สร้างผ่าน API ทั้งหมด (โหลดแบบเป็นชุดๆ เพื่อข้อมูลครบถ้วน)
                       </p>
                       <div className="flex items-center gap-1">
                         <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
@@ -962,6 +1025,8 @@ export default function BotTransactionsPage() {
                     )}
                   </div>
 
+                  {/* Removed Show All Data Toggle - always show all data */}
+
                   {/* Manual refresh button */}
                   <button
                     onClick={handleRefresh}
@@ -981,13 +1046,13 @@ export default function BotTransactionsPage() {
                 <table className="w-full">
                   <thead>
                                           <tr className="border-b border-gray-200 dark:border-gray-700">
-                        <th className="text-left py-3 px-4 font-semibold text-gray-900 dark:text-white">วันที่/เวลา</th>
+                        <th className="text-left py-3 px-4 font-semibold text-gray-900 dark:text-white">อัพเดทล่าสุด*</th>
                         <th className="text-left py-3 px-4 font-semibold text-gray-900 dark:text-white">ID</th>
                         <th className="text-left py-3 px-4 font-semibold text-gray-900 dark:text-white">Customer</th>
                       <th className="text-left py-3 px-4 font-semibold text-gray-900 dark:text-white">เว็บไซต์</th>
                       <th className="text-left py-3 px-4 font-semibold text-gray-900 dark:text-white">ธนาคาร</th>
                       <th className="text-left py-3 px-4 font-semibold text-gray-900 dark:text-white">เลขบัญชี</th>
-                      <th className="text-left py-3 px-4 font-semibold text-gray-900 dark:text-white">ชื่อจริง</th>
+                      <th className="text-left py-3 px-4 font-semibold text-gray-900 dark:text-white w-40 max-w-40">ชื่อจริง</th>
                       <th className="text-center py-3 px-4 font-semibold text-gray-900 dark:text-white">จำนวนเงิน</th>
                       <th className="text-left py-3 px-4 font-semibold text-gray-900 dark:text-white">สถานะ</th>
                       <th className="text-center py-3 px-4 font-semibold text-gray-900 dark:text-white">การจัดการ</th>
@@ -997,9 +1062,21 @@ export default function BotTransactionsPage() {
                     {loading && transactions.length === 0 ? (
                       <tr>
                         <td colSpan={10} className="py-16 text-center">
-                          <div className="flex items-center justify-center">
-                            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
-                            <span className="ml-2 text-gray-500 dark:text-gray-400">กำลังโหลดข้อมูลธุรกรรม...</span>
+                          <div className="flex flex-col items-center justify-center">
+                            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mb-2"></div>
+                            <span className="text-gray-500 dark:text-gray-400 text-center">
+                              กำลังโหลดข้อมูลธุรกรรมทั้งหมด (แบบเป็นชุดๆ)...
+                            </span>
+                            {loadingProgress.total > 0 && (
+                              <div className="mt-2 text-xs text-gray-400">
+                                โหลดทีม {loadingProgress.current + 1} จาก {loadingProgress.total} ทีม
+                              </div>
+                            )}
+                            {transactions.length > 0 && (
+                              <div className="mt-1 text-xs text-blue-600 dark:text-blue-400">
+                                พบข้อมูลแล้ว {transactions.length} รายการ
+                              </div>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -1032,7 +1109,7 @@ export default function BotTransactionsPage() {
                         <tr key={transaction.id} className="border-b border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors duration-200">
                           <td className="py-4 px-4">
                             <div className="text-sm font-medium text-gray-900 dark:text-white">
-                              {formatDate(transaction.createdAt)}
+                              {formatDate(transaction.updatedAt || transaction.createdAt)}
                             </div>
                           </td>
                           <td className="py-4 px-4">
@@ -1060,8 +1137,8 @@ export default function BotTransactionsPage() {
                               {transaction.accountNumber}
                             </div>
                           </td>
-                          <td className="py-4 px-4">
-                            <div className="text-sm text-gray-900 dark:text-white">
+                          <td className="py-4 px-4 w-40 max-w-40">
+                            <div className="text-sm text-gray-900 dark:text-white truncate" title={transaction.realName}>
                               {transaction.realName}
                             </div>
                           </td>
@@ -1069,6 +1146,11 @@ export default function BotTransactionsPage() {
                             <div className="text-sm font-bold text-red-600 dark:text-red-400">
                               -฿{formatAmount(transaction.amount)}
                             </div>
+                            {transaction.balanceAfter !== undefined && (
+                              <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                (฿{formatAmount(transaction.balanceAfter)})
+                              </div>
+                            )}
                           </td>
                           <td className="py-4 px-4 text-left">
                             <div className="flex items-center gap-2">
@@ -1157,7 +1239,7 @@ export default function BotTransactionsPage() {
               </div>
 
               {/* Load More Button */}
-              {hasMoreData && !loading && transactions.length > 0 && (
+              {hasMoreData && !loading && transactions.length > 0 && !showAllData && (
                 <div className="mt-6 text-center">
                   <button
                     onClick={loadMoreData}
@@ -1178,18 +1260,34 @@ export default function BotTransactionsPage() {
                       </>
                     )}
                   </button>
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
-                    กำลังแสดง {transactions.length} รายการ - คลิกเพื่อดูเพิ่มเติม
-                  </p>
+                                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                      กำลังแสดง {transactions.length} รายการ (ทั้งหมด)
+                    </p>
                 </div>
               )}
+
+              {/* Show all data info - removed since we always show all data */}
+
+              {/* Table Note */}
+              <div className="mt-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                <p className="text-xs text-blue-700 dark:text-blue-300">
+                  <span className="font-medium">หมายเหตุ:</span> 
+                  * ตารางเรียงลำดับตามเวลาที่สร้างรายการ (ล่าสุดด้านบน) แต่แสดงเวลาอัพเดทล่าสุดในคอลัมน์
+                </p>
+              </div>
 
               {/* Pagination */}
               {Math.ceil(filteredTransactions.length / itemsPerPage) > 1 && (
                 <div className="mt-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                   <div className="text-sm text-gray-700 dark:text-gray-300">
-                    แสดง {((currentPage - 1) * itemsPerPage) + 1} ถึง {Math.min(currentPage * itemsPerPage, filteredTransactions.length)} จาก {filteredTransactions.length} รายการ
-                    {hasMoreData && <span className="text-blue-600 dark:text-blue-400"> (มีข้อมูลเพิ่มเติม)</span>}
+                    <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-1">
+                        <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                        <span className="text-green-600 dark:text-green-400 font-medium">ข้อมูลทั้งหมด</span>
+                      </div>
+                      <span>-</span>
+                      <span>แสดง {((currentPage - 1) * itemsPerPage) + 1} ถึง {Math.min(currentPage * itemsPerPage, filteredTransactions.length)} จาก {filteredTransactions.length} รายการ</span>
+                    </div>
                   </div>
                   
                   <div className="flex items-center space-x-2">
