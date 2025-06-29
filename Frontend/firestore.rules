@@ -145,6 +145,16 @@ service cloud.firestore {
       allow read, write: if true;
     }
     
+    // Audit Logs collection - สำหรับ API endpoints
+    match /audit_logs/{logId} {
+      // อนุญาตให้อ่าน-เขียนข้อมูลสำหรับ API endpoints (ไม่ต้องล็อกอิน)
+      // ใช้สำหรับ Team API การสร้าง audit logs
+      allow read, write: if true;
+      
+      // ทุกคนที่ล็อกอินแล้วอ่านได้ (สำหรับ dashboard)
+      allow read: if request.auth != null;
+    }
+    
     // Test collections
     match /__test__/{testId} {
       allow read, write: if true;
