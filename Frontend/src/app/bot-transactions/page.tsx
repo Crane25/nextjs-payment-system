@@ -103,6 +103,15 @@ const statusColors: { [key: string]: string } = Object.fromEntries(
   Object.entries(statusConfig).map(([key, config]) => [key, config.color])
 );
 
+// Helper function to get local date string (avoiding timezone issues)
+const getLocalDateString = () => {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 export default function BotTransactionsPage() {
   const { user } = useAuth();
   const { userProfile } = useUserProfile();
@@ -119,6 +128,7 @@ export default function BotTransactionsPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [selectedTeamFilter, setSelectedTeamFilter] = useState<'all' | string>('all');
+  const [selectedDate, setSelectedDate] = useState<string>(getLocalDateString()); // YYYY-MM-DD format
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
 
   // Modal states
@@ -197,6 +207,11 @@ export default function BotTransactionsPage() {
         return;
       }
 
+      // Get selected date range (00:00:00 to 23:59:59)
+      const selectedDateObj = new Date(selectedDate);
+      const startOfDay = new Date(selectedDateObj.getFullYear(), selectedDateObj.getMonth(), selectedDateObj.getDate(), 0, 0, 0);
+      const endOfDay = new Date(selectedDateObj.getFullYear(), selectedDateObj.getMonth(), selectedDateObj.getDate(), 23, 59, 59);
+
       setError(null);
 
       // Use optimized query to fetch bot transactions specifically
@@ -216,10 +231,12 @@ export default function BotTransactionsPage() {
         
         while (hasMore && batchCount < maxBatches) {
           try {
-            // Try compound query with composite index first
+            // Try compound query with composite index first - filtered by selected date
             let teamQuery = query(
               collection(db, 'transactions'),
               where('teamId', '==', teamId),
+              where('createdAt', '>=', startOfDay),
+              where('createdAt', '<=', endOfDay),
               orderBy('createdAt', 'desc'),
               limit(10000) // Always use max limit per batch
             );
@@ -229,6 +246,8 @@ export default function BotTransactionsPage() {
               teamQuery = query(
                 collection(db, 'transactions'),
                 where('teamId', '==', teamId),
+                where('createdAt', '>=', startOfDay),
+                where('createdAt', '<=', endOfDay),
                 orderBy('createdAt', 'desc'),
                 startAfter(lastDoc),
                 limit(10000)
@@ -258,11 +277,13 @@ export default function BotTransactionsPage() {
           } catch (error) {
             console.warn(`Compound query failed for team ${teamId} batch ${batchCount}, trying fallback:`, error);
             
-            // Fallback: Use simple query without orderBy if compound query fails
+            // Fallback: Use simple query without orderBy if compound query fails - filtered by selected date
             try {
               let fallbackQuery = query(
                 collection(db, 'transactions'),
                 where('teamId', '==', teamId),
+                where('createdAt', '>=', startOfDay),
+                where('createdAt', '<=', endOfDay),
                 limit(10000)
               );
 
@@ -362,7 +383,7 @@ export default function BotTransactionsPage() {
       setRefreshing(false);
       isLoadingRef.current = false;
     }
-  }, [user, userProfile, teams, teamsLoading, itemsPerPage, showAllData]);
+  }, [user, userProfile, teams, teamsLoading, itemsPerPage, showAllData, selectedDate]);
 
   // Removed loadMoreTransactions - now using pagination
 
@@ -394,10 +415,13 @@ export default function BotTransactionsPage() {
         const newRecords = snapshot.docChanges().filter(change => change.type === 'added');
         
         if (newRecords.length > 0) {
-          // Check if any new records are bot transactions relevant to current user and recent
+          // Check if any new records are bot transactions relevant to current user and from selected date
           const userTeamIds = teams.map(team => team.id);
-          const twentyFourHoursAgo = new Date();
-          twentyFourHoursAgo.setHours(twentyFourHoursAgo.getHours() - 24);
+          
+          // Get selected date range (00:00:00 to 23:59:59)
+          const selectedDateObj = new Date(selectedDate);
+          const startOfSelectedDate = new Date(selectedDateObj.getFullYear(), selectedDateObj.getMonth(), selectedDateObj.getDate(), 0, 0, 0);
+          const endOfSelectedDate = new Date(selectedDateObj.getFullYear(), selectedDateObj.getMonth(), selectedDateObj.getDate(), 23, 59, 59);
           
           const relevantNewRecords = newRecords.filter(change => {
             const data = change.doc.data();
@@ -407,9 +431,9 @@ export default function BotTransactionsPage() {
               return false;
             }
             
-            // Check if record is recent (within 24 hours)
+            // Check if record is from selected date only
             const recordTime = data.createdAt?.toDate?.() || new Date(data.createdAt);
-            if (recordTime < twentyFourHoursAgo) {
+            if (recordTime < startOfSelectedDate || recordTime > endOfSelectedDate) {
               return false;
             }
             
@@ -455,8 +479,9 @@ export default function BotTransactionsPage() {
             setLastUpdated(new Date());
             
             // Show notification
+            const isToday = selectedDate === getLocalDateString();
             toast.success(
-              `มีธุรกรรม Bot ใหม่ ${relevantNewRecords.length} รายการ`,
+              `มีธุรกรรม Bot ใหม่${isToday ? 'วันนี้' : 'ในวันที่เลือก'} ${relevantNewRecords.length} รายการ`,
               {
                 duration: 4000,
                 position: 'top-right',
@@ -523,7 +548,7 @@ export default function BotTransactionsPage() {
         unsubscribe();
       }
     };
-  }, [user, userProfile, teamsLoading, teams, loadTransactions]);
+  }, [user, userProfile, teamsLoading, teams, loadTransactions, selectedDate]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -537,7 +562,7 @@ export default function BotTransactionsPage() {
   // Reset page when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, statusFilter, selectedTeamFilter, itemsPerPage]);
+  }, [searchTerm, statusFilter, selectedTeamFilter, itemsPerPage, selectedDate]);
 
   const handleRefresh = () => {
     loadTransactions(true);
@@ -553,6 +578,11 @@ export default function BotTransactionsPage() {
       setLoadingMore(true);
       const userTeamIds = teams.map(team => team.id);
       
+      // Get selected date range (00:00:00 to 23:59:59)
+      const selectedDateObj = new Date(selectedDate);
+      const startOfDay = new Date(selectedDateObj.getFullYear(), selectedDateObj.getMonth(), selectedDateObj.getDate(), 0, 0, 0);
+      const endOfDay = new Date(selectedDateObj.getFullYear(), selectedDateObj.getMonth(), selectedDateObj.getDate(), 23, 59, 59);
+      
       let additionalDocs: any[] = [];
       
       // Get the last transaction's timestamp for cursor-based pagination
@@ -561,10 +591,12 @@ export default function BotTransactionsPage() {
 
       for (const teamId of userTeamIds) {
         try {
-          // Try compound query with composite index first
+          // Try compound query with composite index first - filtered by selected date
           let teamQuery = query(
             collection(db, 'transactions'),
             where('teamId', '==', teamId),
+            where('createdAt', '>=', startOfDay),
+            where('createdAt', '<=', endOfDay),
             orderBy('createdAt', 'desc'),
             startAfter(lastTimestamp),
             limit(1000)
@@ -575,11 +607,13 @@ export default function BotTransactionsPage() {
         } catch (error) {
           console.warn(`Compound query failed for team ${teamId} loadMore, trying fallback:`, error);
           
-          // Fallback: Use simple query without orderBy and startAfter
+          // Fallback: Use simple query without orderBy and startAfter - filtered by selected date
           try {
             let fallbackQuery = query(
               collection(db, 'transactions'),
               where('teamId', '==', teamId),
+              where('createdAt', '>=', startOfDay),
+              where('createdAt', '<=', endOfDay),
               limit(1000)
             );
 
@@ -640,7 +674,7 @@ export default function BotTransactionsPage() {
     } finally {
       setLoadingMore(false);
     }
-  }, [user, userProfile, teams, teamsLoading, transactions, loadingMore, hasMoreData]);
+  }, [user, userProfile, teams, teamsLoading, transactions, loadingMore, hasMoreData, selectedDate]);
 
   // Remove load all data function since we always show all data
 
@@ -1073,6 +1107,28 @@ export default function BotTransactionsPage() {
 
             {/* Filters */}
             <div className="flex flex-wrap gap-3">
+              {/* Date picker */}
+              <div className="flex items-center space-x-2">
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300 whitespace-nowrap">
+                  วันที่:
+                </label>
+                <input
+                  type="date"
+                  value={selectedDate}
+                  onChange={(e) => setSelectedDate(e.target.value)}
+                  className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                />
+                {selectedDate !== getLocalDateString() && (
+                  <button
+                    onClick={() => setSelectedDate(getLocalDateString())}
+                    className="px-2 py-1 text-xs bg-blue-50 hover:bg-blue-100 dark:bg-blue-900/20 dark:hover:bg-blue-900/40 text-blue-600 dark:text-blue-400 rounded transition-colors"
+                    title="กลับไปวันนี้"
+                  >
+                    วันนี้
+                  </button>
+                )}
+              </div>
+
               {/* Items per page */}
               <div className="flex items-center space-x-2">
                 <label className="text-sm font-medium text-gray-700 dark:text-gray-300 whitespace-nowrap">
@@ -1137,12 +1193,13 @@ export default function BotTransactionsPage() {
               </div>
 
               {/* Enhanced Clear Filters Button */}
-              {(searchTerm || statusFilter !== 'all' || selectedTeamFilter !== 'all') && (
+              {(searchTerm || statusFilter !== 'all' || selectedTeamFilter !== 'all' || selectedDate !== getLocalDateString()) && (
                 <button
                   onClick={() => {
                     setSearchTerm('');
                     setStatusFilter('all');
                     setSelectedTeamFilter('all');
+                    setSelectedDate(getLocalDateString());
                     setCurrentPage(1);
                   }}
                   className="flex items-center gap-2 px-4 py-2 text-sm bg-red-50 hover:bg-red-100 dark:bg-red-900/20 dark:hover:bg-red-900/40 text-red-600 dark:text-red-400 rounded-lg transition-colors"
@@ -1192,11 +1249,15 @@ export default function BotTransactionsPage() {
                   </div>
                   <div>
                     <h3 className="text-xl font-bold text-gray-900 dark:text-white">
-                      ธุรกรรม Bot API - ข้อมูลทั้งหมด (สูงสุด 100,000 รายการ)
+                      ธุรกรรม Bot API - วันที่ {new Date(selectedDate).toLocaleDateString('th-TH', { 
+                        year: 'numeric', 
+                        month: 'long', 
+                        day: 'numeric' 
+                      })}
                     </h3>
                     <div className="flex items-center gap-2">
                       <p className="text-sm text-gray-600 dark:text-gray-400">
-                        รายการธุรกรรมการถอนเงินที่สร้างผ่าน API ทั้งหมด (โหลดแบบเป็นชุดๆ เพื่อข้อมูลครบถ้วน)
+                        รายการธุรกรรมการถอนเงินที่สร้างผ่าน API ในวันที่เลือกเท่านั้น
                       </p>
                       <div className="flex items-center gap-1">
                         <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
@@ -1257,7 +1318,7 @@ export default function BotTransactionsPage() {
                           <div className="flex flex-col items-center justify-center">
                             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mb-2"></div>
                             <span className="text-gray-500 dark:text-gray-400 text-center">
-                              กำลังโหลดข้อมูลธุรกรรมทั้งหมด (แบบเป็นชุดๆ)...
+                              กำลังโหลดข้อมูลธุรกรรม...
                             </span>
                             {loadingProgress.total > 0 && (
                               <div className="mt-2 text-xs text-gray-400">
@@ -1291,8 +1352,8 @@ export default function BotTransactionsPage() {
                             <svg className="h-12 w-12 mx-auto mb-2 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
                             </svg>
-                            <p>ไม่พบธุรกรรม Bot API</p>
-                            <p className="text-sm">ยังไม่มีการสร้างธุรกรรมผ่าน API</p>
+                            <p>ไม่พบธุรกรรม Bot API ในวันที่เลือก</p>
+                            <p className="text-sm">ไม่มีการสร้างธุรกรรมผ่าน API ในวันที่เลือก</p>
                           </div>
                         </td>
                       </tr>
@@ -1459,14 +1520,6 @@ export default function BotTransactionsPage() {
               )}
 
               {/* Show all data info - removed since we always show all data */}
-
-              {/* Table Note */}
-              <div className="mt-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
-                <p className="text-xs text-blue-700 dark:text-blue-300">
-                  <span className="font-medium">หมายเหตุ:</span> 
-                  * ตารางเรียงลำดับตามเวลาที่สร้างรายการ (ล่าสุดด้านบน) แต่แสดงเวลาอัพเดทล่าสุดในคอลัมน์
-                </p>
-              </div>
 
               {/* Pagination */}
               {Math.ceil(filteredTransactions.length / itemsPerPage) > 1 && (
