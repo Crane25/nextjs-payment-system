@@ -373,6 +373,158 @@ export default function BotTransactionsPage() {
     }
   }, [loadTransactions, teamsLoading, user, userProfile, teams]);
 
+  // Optimized real-time listener for new bot transactions
+  useEffect(() => {
+    if (!user || !userProfile || teamsLoading) return;
+
+    let unsubscribe: (() => void) | null = null;
+    let isInitialLoad = true;
+
+    // Set up real-time listener for transactions collection
+    unsubscribe = onSnapshot(
+      collection(db, 'transactions'), 
+      (snapshot) => {
+        // Skip initial load to avoid duplicate data
+        if (isInitialLoad) {
+          isInitialLoad = false;
+          return;
+        }
+
+        // Check for new records only
+        const newRecords = snapshot.docChanges().filter(change => change.type === 'added');
+        
+        if (newRecords.length > 0) {
+          // Check if any new records are bot transactions relevant to current user and recent
+          const userTeamIds = teams.map(team => team.id);
+          const twentyFourHoursAgo = new Date();
+          twentyFourHoursAgo.setHours(twentyFourHoursAgo.getHours() - 24);
+          
+          const relevantNewRecords = newRecords.filter(change => {
+            const data = change.doc.data();
+            
+            // Check if it's a bot transaction (withdraw + api)
+            if (data.type !== 'withdraw' || data.createdBy !== 'api') {
+              return false;
+            }
+            
+            // Check if record is recent (within 24 hours)
+            const recordTime = data.createdAt?.toDate?.() || new Date(data.createdAt);
+            if (recordTime < twentyFourHoursAgo) {
+              return false;
+            }
+            
+            // Check if it belongs to user's teams
+            return data.teamId && userTeamIds.includes(data.teamId);
+          });
+
+          if (relevantNewRecords.length > 0) {
+            // Process new records and add them to the list
+            const newTransactions = relevantNewRecords.map(change => {
+              const data = change.doc.data();
+              const team = teams.find(t => t.id === data.teamId);
+              const teamName = team?.name || `ทีม ${data.teamId?.substring(0, 8) || 'ไม่ระบุ'}`;
+              
+              return {
+                id: change.doc.id,
+                ...data,
+                teamName
+              } as BotTransaction;
+            });
+            
+            // Add new transactions to the beginning of the list (since they're newer)
+            setTransactions(prev => {
+              // Check for duplicates before adding
+              const newUniqueTransactions = newTransactions.filter(newTx => 
+                !prev.some(existingTx => existingTx.id === newTx.id)
+              );
+              
+              if (newUniqueTransactions.length > 0) {
+                // Sort by creation time (newest first) and merge
+                const combined = [...newUniqueTransactions, ...prev];
+                return combined.sort((a, b) => {
+                  const aTime = a.createdAt?.toDate?.() || new Date(a.createdAt);
+                  const bTime = b.createdAt?.toDate?.() || new Date(b.createdAt);
+                  return bTime.getTime() - aTime.getTime();
+                });
+              }
+              
+              return prev;
+            });
+            
+            // Update last updated time
+            setLastUpdated(new Date());
+            
+            // Show notification
+            toast.success(
+              `มีธุรกรรม Bot ใหม่ ${relevantNewRecords.length} รายการ`,
+              {
+                duration: 4000,
+                position: 'top-right',
+              }
+            );
+          }
+        }
+
+        // Check for modified records (status changes)
+        const modifiedRecords = snapshot.docChanges().filter(change => change.type === 'modified');
+        
+        if (modifiedRecords.length > 0) {
+          const userTeamIds = teams.map(team => team.id);
+          
+          const relevantModifiedRecords = modifiedRecords.filter(change => {
+            const data = change.doc.data();
+            
+            // Check if it's a bot transaction and belongs to user's teams
+            return data.type === 'withdraw' && 
+                   data.createdBy === 'api' && 
+                   data.teamId && 
+                   userTeamIds.includes(data.teamId);
+          });
+          
+          if (relevantModifiedRecords.length > 0) {
+            // Update existing transactions in real-time
+            setTransactions(prev => {
+              const updated = [...prev];
+              relevantModifiedRecords.forEach(change => {
+                const data = change.doc.data();
+                const index = updated.findIndex(t => t.id === change.doc.id);
+                if (index !== -1) {
+                  const team = teams.find(t => t.id === data.teamId);
+                  const teamName = team?.name || `ทีม ${data.teamId?.substring(0, 8) || 'ไม่ระบุ'}`;
+                  
+                  updated[index] = {
+                    id: change.doc.id,
+                    ...data,
+                    teamName
+                  } as BotTransaction;
+                }
+              });
+              return updated;
+            });
+            
+            // Update last updated time
+            setLastUpdated(new Date());
+          }
+        }
+      },
+      (error) => {
+        // Real-time listener error - log only in development
+        if (process.env.NODE_ENV === 'development') {
+          console.error('Real-time listener error:', error);
+        }
+      }
+    );
+
+    // Store unsubscribe function
+    unsubscribeRef.current = unsubscribe;
+
+    return () => {
+      if (unsubscribe) {
+        unsubscribe();
+      }
+    };
+  }, [user, userProfile, teamsLoading, teams, loadTransactions]);
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -778,7 +930,7 @@ export default function BotTransactionsPage() {
       <div className="space-y-6 lg:space-y-8">
 
         {/* Enhanced Stats Cards with Status Groups */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7 gap-4 mb-8">
           {/* Pending Status */}
           <div className="bg-gradient-to-r from-yellow-500 to-orange-500 rounded-2xl p-5 text-white">
             <div className="flex items-center justify-between">
@@ -855,6 +1007,46 @@ export default function BotTransactionsPage() {
                   <p className="text-xs text-purple-200 mt-1">
                     จาก {transactions.length} รายการ
                   </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Cancelled/Failed Amount */}
+          <div className="bg-gradient-to-r from-red-500 to-pink-600 rounded-2xl p-5 text-white">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="flex items-center gap-1 mb-1">
+                  <span className="text-lg">💸</span>
+                  <p className="text-red-100 text-sm font-medium">
+                    ยอดยกเลิก/ล้มเหลว
+                  </p>
+                </div>
+                <p className="text-xl font-bold">
+                  ฿{formatAmount(transactions.filter(t => ['ยกเลิก', 'ล้มเหลว'].includes(t.status)).reduce((sum, t) => sum + t.amount, 0))}
+                </p>
+                <p className="text-xs text-red-200 mt-1">
+                  {transactions.filter(t => ['ยกเลิก', 'ล้มเหลว'].includes(t.status)).length} รายการ
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Total Transactions */}
+          <div className="bg-gradient-to-r from-teal-500 to-cyan-600 rounded-2xl p-5 text-white">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="flex items-center gap-1 mb-1">
+                  <span className="text-lg">📊</span>
+                  <p className="text-teal-100 text-sm font-medium">
+                    รายการทั้งหมด
+                  </p>
+                </div>
+                <p className="text-2xl font-bold">
+                  {transactions.length}
+                </p>
+                <p className="text-xs text-teal-200 mt-1">
+                  ธุรกรรม Bot API
+                </p>
               </div>
             </div>
           </div>

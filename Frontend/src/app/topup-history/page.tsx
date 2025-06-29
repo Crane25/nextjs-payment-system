@@ -622,6 +622,15 @@ export default function TopupHistory() {
   // Calculate summary statistics for filtered data (for display info only)
   const filteredTotalAmount = filteredHistory.reduce((sum, record) => sum + record.amount, 0);
   const filteredCompletedTransactions = filteredHistory.filter(record => record.status === 'completed').length;
+  
+  // Calculate today's statistics from filtered data
+  const today = new Date().toDateString();
+  const filteredTodayRecords = filteredHistory.filter(record => {
+    const recordDate = new Date(record.timestamp).toDateString();
+    return recordDate === today;
+  });
+  const filteredTodayAmount = filteredTodayRecords.reduce((sum, record) => sum + record.amount, 0);
+  const filteredTodayTransactions = filteredTodayRecords.length;
 
   // Get team counts for filter dropdown
   const getTeamCounts = () => {
@@ -725,11 +734,10 @@ export default function TopupHistory() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-green-100 text-sm font-medium">
-                  เติมเงินทั้งหมด{allTimeStats.isPartialStats ? ' (10K รายการล่าสุด)' : ''}
+                  เติมเงิน (กรองแล้ว)
                 </p>
                 <p className="text-2xl font-bold">
-                  {allTimeStats.isPartialStats && <span className="text-lg">~</span>}
-                  ฿{allTimeStats.totalAmount.toLocaleString('th-TH', { 
+                  ฿{filteredTotalAmount.toLocaleString('th-TH', { 
                     minimumFractionDigits: 2, 
                     maximumFractionDigits: 2 
                   })}
@@ -742,9 +750,9 @@ export default function TopupHistory() {
           <div className="bg-gradient-to-r from-orange-500 to-red-600 rounded-2xl p-6 text-white">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-orange-100 text-sm font-medium">วันนี้</p>
+                <p className="text-orange-100 text-sm font-medium">วันนี้ (กรองแล้ว)</p>
                 <p className="text-2xl font-bold">
-                  ฿{allTimeStats.todayAmount.toLocaleString('th-TH', { 
+                  ฿{filteredTodayAmount.toLocaleString('th-TH', { 
                     minimumFractionDigits: 2, 
                     maximumFractionDigits: 2 
                   })}
@@ -758,11 +766,10 @@ export default function TopupHistory() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-blue-100 text-sm font-medium">
-                  รายการทั้งหมด{allTimeStats.isPartialStats ? ' (10K ล่าสุด)' : ''}
+                  รายการ (กรองแล้ว)
                 </p>
                 <p className="text-2xl font-bold">
-                  {allTimeStats.isPartialStats && <span className="text-lg">~</span>}
-                  {allTimeStats.totalTransactions.toLocaleString()}
+                  {filteredHistory.length.toLocaleString()}
                 </p>
               </div>
               <ClockIcon className="h-8 w-8 text-blue-200" />
@@ -772,8 +779,8 @@ export default function TopupHistory() {
           <div className="bg-gradient-to-r from-purple-500 to-indigo-600 rounded-2xl p-6 text-white">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-purple-100 text-sm font-medium">รายการวันนี้</p>
-                <p className="text-2xl font-bold">{allTimeStats.todayTransactions.toLocaleString()}</p>
+                <p className="text-purple-100 text-sm font-medium">รายการวันนี้ (กรองแล้ว)</p>
+                <p className="text-2xl font-bold">{filteredTodayTransactions.toLocaleString()}</p>
               </div>
               <svg className="h-8 w-8 text-purple-200" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
