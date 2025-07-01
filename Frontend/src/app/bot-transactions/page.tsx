@@ -214,6 +214,15 @@ export default function BotTransactionsPage() {
 
       setError(null);
 
+      // ดึงเว็บไซต์ที่ isActive = true ของทีมที่ user เป็นสมาชิก
+      const activeWebsitesQuery = query(
+        collection(db, 'websites'),
+        where('teamId', 'in', userTeamIds),
+        where('isActive', '==', true)
+      );
+      const activeWebsitesSnapshot = await getDocs(activeWebsitesQuery);
+      const activeWebsiteIds = activeWebsitesSnapshot.docs.map(doc => doc.id);
+
       // Use optimized query to fetch bot transactions specifically
       const queryStartTime = performance.now();
       
@@ -317,7 +326,11 @@ export default function BotTransactionsPage() {
       const allTransactions = allTransactionDocs
         .filter(doc => {
           const data = doc.data();
-          return data.type === 'withdraw' && data.createdBy === 'api';
+          // กรองเฉพาะธุรกรรมที่ websiteId อยู่ในเว็บไซต์ที่ isActive = true
+          return data.type === 'withdraw' && 
+                 data.createdBy === 'api' && 
+                 data.websiteId && 
+                 activeWebsiteIds.includes(data.websiteId);
         })
         .map(doc => {
           const data = doc.data() as any;

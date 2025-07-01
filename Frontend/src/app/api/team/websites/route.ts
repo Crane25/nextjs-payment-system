@@ -47,6 +47,15 @@ export async function GET(request: NextRequest) {
       
       const websitesSnapshot = await getDocs(websitesQuery);
       
+      // Query ธุรกรรมรอโอนของทีมนี้ (ไม่โหลดทั้งหมด)
+      const pendingTransactionsQuery = query(
+        collection(db, 'transactions'),
+        where('teamId', '==', teamId),
+        where('status', '==', 'รอโอน')
+      );
+      const pendingTransactionsSnapshot = await getDocs(pendingTransactionsQuery);
+      const pendingTotalCount = pendingTransactionsSnapshot.size;
+
       // Format website data (only include websites with status === 'active')
       const websites = websitesSnapshot.docs
         .filter(doc => {
@@ -71,7 +80,8 @@ export async function GET(request: NextRequest) {
         teamId: teamId,
         teamName: teamName,
         websiteCount: websites.length,
-        websites: websites
+        pendingTotalCount,
+        websites
       });
 
     } catch (dbError) {
