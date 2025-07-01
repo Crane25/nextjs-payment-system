@@ -1299,12 +1299,14 @@ export default function Dashboard() {
     }
   };
 
-  // ฟังก์ชันกรองเว็บไซต์ตามทีม
+  // ฟังก์ชันกรองเว็บไซต์ตามทีม (ปรับให้กรองเฉพาะทีมที่ user เป็นสมาชิก)
   const getFilteredWebsites = () => {
+    const userTeamIds = teams.map(team => team.id);
+    let filtered = websites.filter(website => userTeamIds.includes(website.teamId));
     if (selectedTeamFilter === 'all') {
-      return websites;
+      return filtered;
     }
-    return websites.filter(website => website.teamId === selectedTeamFilter);
+    return filtered.filter(website => website.teamId === selectedTeamFilter);
   };
 
   // จัดกลุ่มเว็บไซต์ตามทีม

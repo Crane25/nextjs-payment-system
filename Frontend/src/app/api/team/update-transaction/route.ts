@@ -33,11 +33,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (!requestData.status || !['สำเร็จ', 'ล้มเหลว'].includes(requestData.status)) {
+    if (!requestData.status || !['สำเร็จ', 'ล้มเหลว', 'ยกเลิก'].includes(requestData.status)) {
       return NextResponse.json(
         { 
           success: false,
-          error: 'Status must be either "สำเร็จ" or "ล้มเหลว"' 
+          error: 'Status must be either "สำเร็จ", "ล้มเหลว" or "ยกเลิก"' 
         },
         { status: 400 }
       );
@@ -90,7 +90,7 @@ export async function POST(request: NextRequest) {
         }
 
         // Check if transaction is already completed (idempotency check)
-        if (['สำเร็จ', 'ล้มเหลว'].includes(transactionData.status)) {
+        if (["สำเร็จ", "ล้มเหลว", "ยกเลิก"].includes(transactionData.status)) {
           return {
             alreadyCompleted: true,
             transactionData: transactionData,
@@ -101,13 +101,13 @@ export async function POST(request: NextRequest) {
           };
         }
 
-        // Handle credit refund for failed transactions
+        // Handle credit refund for failed or cancelled transactions
         let websiteUpdated = false;
         let refundAmount = 0;
         let websiteName = '';
         let currentWebsiteBalance = 0;
         
-        if (requestData.status === 'ล้มเหลว' && transactionData.type === 'withdraw') {
+        if ((requestData.status === 'ล้มเหลว' || requestData.status === 'ยกเลิก') && transactionData.type === 'withdraw') {
           if (transactionData.websiteId && transactionData.amount) {
             // Validate that the money was actually deducted
             if (transactionData.balanceBefore !== undefined && 
@@ -182,6 +182,12 @@ export async function POST(request: NextRequest) {
           updateData.completedAt = serverTimestamp();
         } else if (requestData.status === 'ล้มเหลว') {
           updateData.failedAt = serverTimestamp();
+          if (websiteUpdated) {
+            updateData.refundedAt = serverTimestamp();
+            updateData.refundAmount = refundAmount;
+          }
+        } else if (requestData.status === 'ยกเลิก') {
+          updateData.cancelledAt = serverTimestamp();
           if (websiteUpdated) {
             updateData.refundedAt = serverTimestamp();
             updateData.refundAmount = refundAmount;

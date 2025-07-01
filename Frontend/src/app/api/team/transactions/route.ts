@@ -128,34 +128,29 @@ export async function POST(request: NextRequest) {
       const existingTransactionSnapshot = await getDocs(existingTransactionQuery);
       
       if (!existingTransactionSnapshot.empty) {
-        const existingTransaction = existingTransactionSnapshot.docs[0];
-        const existingData = existingTransaction.data();
-        
+        // log เฉพาะ error (ซ้ำถือว่า error)
+        await addDoc(collection(db, 'audit_logs'), {
+          action: 'duplicate_transaction_attempt',
+          apiEndpoint: '/api/team/transactions',
+          idempotencyKey: idempotencyKey,
+          teamId: apiTeamId,
+          teamName: teamName,
+          transactionId: requestData.transactionId,
+          customerUsername: requestData.customerUsername,
+          amount: requestData.amount,
+          timestamp: serverTimestamp(),
+          success: false,
+          userAgent: request.headers.get('User-Agent') || 'Unknown',
+          ip: request.headers.get('X-Forwarded-For') || 'Unknown',
+          error: 'Duplicate idempotencyKey'
+        });
         return NextResponse.json(
           { 
-            success: true,
-            message: 'Transaction already exists (idempotent response)',
-            data: {
-              id: existingTransaction.id,
-              transactionId: existingData.transactionId,
-              customerUsername: existingData.customerUsername,
-              websiteName: existingData.websiteName,
-              websiteId: existingData.websiteId,
-              bankName: existingData.bankName,
-              accountNumber: existingData.accountNumber,
-              realName: existingData.realName,
-              amount: existingData.amount,
-              balanceBefore: existingData.balanceBefore,
-              balanceAfter: existingData.balanceAfter,
-              status: existingData.status,
-              type: existingData.type,
-              teamId: existingData.teamId,
-              teamName: existingData.teamName,
-              createdAt: existingData.createdAt?.toDate?.()?.toISOString() || existingData.createdAt
-            },
-            idempotent: true
+            success: false,
+            error: 'Duplicate transaction (idempotencyKey already exists)',
+            idempotencyKey: idempotencyKey
           },
-          { status: 200 }
+          { status: 409 }
         );
       }
 
@@ -318,26 +313,19 @@ export async function POST(request: NextRequest) {
       }, { status: 201 });
 
     } catch (dbError) {
-      console.error('Database error:', dbError);
-      
-      // Create error audit log
-      try {
-        await addDoc(collection(db, 'audit_logs'), {
-          action: 'withdraw_request_failed',
-          apiEndpoint: '/api/team/transactions',
-          error: dbError instanceof Error ? dbError.message : 'Unknown database error',
-          transactionId: requestData.transactionId,
-          customerUsername: requestData.customerUsername,
-          amount: requestData.amount,
-          timestamp: serverTimestamp(),
-          success: false,
-          userAgent: request.headers.get('User-Agent') || 'Unknown',
-          ip: request.headers.get('X-Forwarded-For') || 'Unknown'
-        });
-      } catch (auditError) {
-        console.error('Failed to create error audit log:', auditError);
-      }
-
+      // log เฉพาะ error
+      await addDoc(collection(db, 'audit_logs'), {
+        action: 'withdraw_request_failed',
+        apiEndpoint: '/api/team/transactions',
+        error: dbError instanceof Error ? dbError.message : 'Unknown database error',
+        transactionId: requestData.transactionId,
+        customerUsername: requestData.customerUsername,
+        amount: requestData.amount,
+        timestamp: serverTimestamp(),
+        success: false,
+        userAgent: request.headers.get('User-Agent') || 'Unknown',
+        ip: request.headers.get('X-Forwarded-For') || 'Unknown'
+      });
       return NextResponse.json(
         { 
           success: false,
