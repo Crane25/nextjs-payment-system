@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { collection, query, where, getDocs, getDoc, limit, updateDoc, doc, serverTimestamp, addDoc, runTransaction } from 'firebase/firestore';
+import { collection, query, where, getDocs, getDoc, limit, updateDoc, doc, serverTimestamp, addDoc, runTransaction, orderBy } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 
 export async function GET(request: NextRequest) {
@@ -45,41 +45,17 @@ export async function GET(request: NextRequest) {
       const teamUrl = teamData.url || '';
       const teamApiKey = teamData.apiKey || '';
       
-      // Get transactions for this team
+      // Get transactions for this team (เฉพาะ status = 'รอโอน')
       const transactionsQuery = query(
         collection(db, 'transactions'),
-        where('teamId', '==', teamId)
+        where('teamId', '==', teamId),
+        where('status', '==', 'รอโอน'),
+        orderBy('createdAt'),
+        limit(1)
       );
-      
       const transactionsSnapshot = await getDocs(transactionsQuery);
       
-      // Filter for pending transactions on client side
-      const pendingTransactions = transactionsSnapshot.docs
-        .filter(doc => {
-          const data = doc.data() as any;
-          const status = data.status;
-          return status === 'รอโอน';
-        })
-        .map(doc => ({
-          doc: doc,
-          data: doc.data() as any,
-          createdAt: doc.data().createdAt?.toDate?.() || new Date(doc.data().createdAt)
-        }));
-      
-      // Create audit log for request - DISABLED
-      // await addDoc(collection(db, 'audit_logs'), {
-      //   action: 'pending_transactions_request',
-      //   apiEndpoint: '/api/team/pending-transactions',
-      //   teamId: teamId,
-      //   teamName: teamName,
-      //   pendingCount: pendingTransactions.length,
-      //   timestamp: serverTimestamp(),
-      //   success: true,
-      //   userAgent: request.headers.get('User-Agent') || 'Unknown',
-      //   ip: request.headers.get('X-Forwarded-For') || 'Unknown'
-      // });
-
-      if (pendingTransactions.length === 0) {
+      if (transactionsSnapshot.empty) {
         return NextResponse.json({
           success: true,
           teamId: teamId,
@@ -89,14 +65,9 @@ export async function GET(request: NextRequest) {
         });
       }
 
-      // Sort by creation date (oldest first for FIFO)
-      pendingTransactions.sort((a, b) => {
-        return a.createdAt.getTime() - b.createdAt.getTime();
-      });
-
       // Get the first (oldest) pending transaction
-      const transactionDoc = pendingTransactions[0].doc;
-      const transactionData = pendingTransactions[0].data;
+      const transactionDoc = transactionsSnapshot.docs[0];
+      const transactionData = transactionDoc.data();
       
       // Get website data for URL and API Key
       let websiteUrl = '';
@@ -218,8 +189,8 @@ export async function GET(request: NextRequest) {
         apiKey: websiteApiKey,
         message: 'Transaction retrieved and status updated to "กำลังโอน"',
         transaction: transaction,
-        totalPendingBefore: pendingTransactions.length,
-        totalPendingAfter: pendingTransactions.length - 1
+        totalPendingBefore: transactionsSnapshot.docs.length,
+        totalPendingAfter: transactionsSnapshot.docs.length - 1
       });
 
     } catch (dbError) {
