@@ -350,7 +350,7 @@ export default function BotTransactionsPage() {
             where('createdAt', '>=', startOfDay),
             where('createdAt', '<=', endOfDay),
             orderBy('createdAt', 'desc'),
-            limit(1000)
+            limit(500)
           ));
           
           setLoadingProgress(prev => ({ ...prev, current: prev.current + 1 }));
@@ -366,7 +366,7 @@ export default function BotTransactionsPage() {
             where('createdAt', '>=', startOfDay),
             where('createdAt', '<=', endOfDay),
             orderBy('createdAt', 'desc'),
-            limit(1000)
+            limit(500)
           ));
           
           setLoadingProgress(prev => ({ ...prev, current: prev.current + 1 }));
@@ -650,7 +650,7 @@ export default function BotTransactionsPage() {
             where('createdAt', '<=', endOfDay),
             orderBy('createdAt', 'desc'),
             startAfter(lastTimestamp),
-            limit(1000)
+            limit(500)
           );
 
           const teamSnapshot = await getDocs(teamQuery);
@@ -665,7 +665,7 @@ export default function BotTransactionsPage() {
               where('teamId', '==', teamId),
               where('createdAt', '>=', startOfDay),
               where('createdAt', '<=', endOfDay),
-              limit(1000)
+              limit(500)
             );
 
             const fallbackSnapshot = await getDocs(fallbackQuery);
@@ -717,7 +717,7 @@ export default function BotTransactionsPage() {
       setTransactions(prev => [...prev, ...filteredAdditionalRecords]);
       
       // Check if we have more data (if we got less than requested, we've reached the end)
-      setHasMoreData(additionalDocs.length >= userTeamIds.length * 1000);
+      setHasMoreData(additionalDocs.length >= userTeamIds.length * 500);
 
     } catch (error) {
       console.error('Error loading more data:', error);
