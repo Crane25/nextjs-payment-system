@@ -121,14 +121,13 @@ export default function BotTransactionsPage() {
   // Teams data loaded - removed debug logging
 
   const [transactions, setTransactions] = useState<BotTransaction[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [updatingStatus, setUpdatingStatus] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [selectedTeamFilter, setSelectedTeamFilter] = useState<'all' | string>('all');
-  const [selectedDate, setSelectedDate] = useState<string>(getLocalDateString()); // YYYY-MM-DD format
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
 
   // Modal states
@@ -170,16 +169,36 @@ export default function BotTransactionsPage() {
   // Real-time listener
   const unsubscribeRef = useRef<(() => void) | null>(null);
 
+  // Add initial loading state to show user that data is being loaded
+  const [initialLoading, setInitialLoading] = useState(true);
+
+  // Add websites caching to avoid repeated queries
+  const websitesCache = useRef<{
+    data: { [teamId: string]: string[] };
+    timestamp: number;
+    ttl: number;
+  }>({
+    data: {},
+    timestamp: 0,
+    ttl: 5 * 60 * 1000 // 5 minutes cache
+  });
+
+  // Enhanced query batching
+  const queryBatchSize = 10; // Process teams in batches for better performance
+
   // Optimized loading function with proper server-side pagination
   const loadTransactions = useCallback(async (forceRefresh = false) => {
     if (!user || !userProfile || teamsLoading) {
       return;
     }
 
-    // Prevent multiple concurrent requests
+    // Prevent multiple concurrent requests - stronger protection
     if (isLoadingRef.current && !forceRefresh) {
+      console.log('🔄 Skipping load - already loading');
       return;
     }
+
+    console.log('📥 Starting loadTransactions:', { forceRefresh, loading: isLoadingRef.current });
 
     try {
       isLoadingRef.current = true;
@@ -189,10 +208,17 @@ export default function BotTransactionsPage() {
         setRefreshing(true);
         setTransactions([]);
         setCurrentPage(1);
-        setHasMoreData(false); // No need for load more since we show all data
+        setHasMoreData(false);
         setLoadingProgress({ current: 0, total: 0 });
+        // Clear websites cache on force refresh
+        websitesCache.current = { data: {}, timestamp: 0, ttl: 5 * 60 * 1000 };
       } else {
-        setLoading(true);
+        // Use initialLoading for first load, loading for subsequent loads
+        if (transactions.length === 0) {
+          setInitialLoading(true);
+        } else {
+          setLoading(true);
+        }
         setLoadingProgress({ current: 0, total: 0 });
       }
 
@@ -202,190 +228,210 @@ export default function BotTransactionsPage() {
       if (userTeamIds.length === 0) {
         setTransactions([]);
         setLoading(false);
+        setInitialLoading(false);
         setRefreshing(false);
         isLoadingRef.current = false;
         return;
       }
 
       // Get selected date range (00:00:00 to 23:59:59)
-      const selectedDateObj = new Date(selectedDate);
+      const selectedDateObj = new Date(getLocalDateString());
       const startOfDay = new Date(selectedDateObj.getFullYear(), selectedDateObj.getMonth(), selectedDateObj.getDate(), 0, 0, 0);
       const endOfDay = new Date(selectedDateObj.getFullYear(), selectedDateObj.getMonth(), selectedDateObj.getDate(), 23, 59, 59);
 
       setError(null);
 
-      // ดึงเว็บไซต์ที่ isActive = true ของทีมที่ user เป็นสมาชิก
-      const activeWebsitesQuery = query(
-        collection(db, 'websites'),
-        where('teamId', 'in', userTeamIds),
-        where('isActive', '==', true)
-      );
-      const activeWebsitesSnapshot = await getDocs(activeWebsitesQuery);
-      const activeWebsiteIds = activeWebsitesSnapshot.docs.map(doc => doc.id);
-
-      // Use optimized query to fetch bot transactions specifically
-      const queryStartTime = performance.now();
-      
-            let allTransactionDocs: any[] = [];
-      setLoadingProgress({ current: 0, total: userTeamIds.length });
-      
-      for (let teamIndex = 0; teamIndex < userTeamIds.length; teamIndex++) {
-        const teamId = userTeamIds[teamIndex];
-        setLoadingProgress({ current: teamIndex, total: userTeamIds.length });
-        let teamDocs: any[] = [];
-        let hasMore = true;
-        let lastDoc: any = null;
-        let batchCount = 0;
-        const maxBatches = showAllData ? 10 : 1; // Load up to 10 batches for all data (100,000 docs max)
+      // Enhanced websites caching with per-team cache
+      const getActiveWebsitesForTeams = async (teamIds: string[]): Promise<{ [teamId: string]: string[] }> => {
+        const now = Date.now();
+        const cache = websitesCache.current;
         
-        while (hasMore && batchCount < maxBatches) {
-          try {
-            // Try compound query with composite index first - filtered by selected date
-            let teamQuery = query(
-              collection(db, 'transactions'),
-              where('teamId', '==', teamId),
-              where('createdAt', '>=', startOfDay),
-              where('createdAt', '<=', endOfDay),
-              orderBy('createdAt', 'desc'),
-              limit(10000) // Always use max limit per batch
-            );
-
-            // Add cursor for pagination if we have a last document
-            if (lastDoc) {
-              teamQuery = query(
-                collection(db, 'transactions'),
-                where('teamId', '==', teamId),
-                where('createdAt', '>=', startOfDay),
-                where('createdAt', '<=', endOfDay),
-                orderBy('createdAt', 'desc'),
-                startAfter(lastDoc),
-                limit(10000)
-              );
-            }
-
-            const teamSnapshot = await getDocs(teamQuery);
-            const docs = teamSnapshot.docs;
-            
-            if (docs.length === 0) {
-              hasMore = false;
-            } else {
-              teamDocs.push(...docs);
-              lastDoc = docs[docs.length - 1];
-              batchCount++;
-              
-              // If we got less than the limit, we've reached the end
-              if (docs.length < 10000) {
-                hasMore = false;
-              }
-              
-              // For limited mode, stop after first batch
-              if (!showAllData) {
-                hasMore = false;
-              }
-            }
-          } catch (error) {
-            console.warn(`Compound query failed for team ${teamId} batch ${batchCount}, trying fallback:`, error);
-            
-            // Fallback: Use simple query without orderBy if compound query fails - filtered by selected date
-            try {
-              let fallbackQuery = query(
-                collection(db, 'transactions'),
-                where('teamId', '==', teamId),
-                where('createdAt', '>=', startOfDay),
-                where('createdAt', '<=', endOfDay),
-                limit(10000)
-              );
-
-              const fallbackSnapshot = await getDocs(fallbackQuery);
-              teamDocs.push(...fallbackSnapshot.docs);
-              console.log(`✅ Fallback query succeeded for team ${teamId}`);
-              hasMore = false; // Don't try more batches for fallback
-            } catch (fallbackError) {
-              console.error(`Both queries failed for team ${teamId}:`, fallbackError);
-              hasMore = false;
-            }
-          }
+        // Check if cache is still valid and has all teams
+        const hasAllTeams = teamIds.every(teamId => cache.data[teamId]);
+        if (hasAllTeams && (now - cache.timestamp) < cache.ttl) {
+          performanceRef.current.cacheHits++;
+          console.log('🎯 Using cached websites data');
+          return cache.data;
         }
-        
-        allTransactionDocs.push(...teamDocs);
-        console.log(`📊 Loaded ${teamDocs.length} documents for team ${teamId} in ${batchCount} batches`);
+
+        // Fetch missing teams only
+        const missingTeams = teamIds.filter(teamId => 
+          !cache.data[teamId] || (now - cache.timestamp) >= cache.ttl
+        );
+
+        if (missingTeams.length > 0) {
+          console.log('🔍 Fetching websites for teams:', missingTeams.length);
+          
+          // Process teams in batches for better performance
+          const websiteBatches = [];
+          for (let i = 0; i < missingTeams.length; i += queryBatchSize) {
+            const batch = missingTeams.slice(i, i + queryBatchSize);
+            websiteBatches.push(
+              getDocs(query(
+                collection(db, 'websites'),
+                where('teamId', 'in', batch),
+                where('isActive', '==', true)
+              ))
+            );
+          }
+
+          const websiteSnapshots = await Promise.all(websiteBatches);
+          
+          // Process results and update cache
+          const newCacheData = { ...cache.data };
+          websiteSnapshots.forEach(snapshot => {
+            snapshot.docs.forEach(doc => {
+              const data = doc.data();
+              if (!newCacheData[data.teamId]) {
+                newCacheData[data.teamId] = [];
+              }
+              newCacheData[data.teamId].push(doc.id);
+            });
+          });
+
+          // Ensure all teams have at least empty array
+          missingTeams.forEach(teamId => {
+            if (!newCacheData[teamId]) {
+              newCacheData[teamId] = [];
+            }
+          });
+
+          // Update cache
+          websitesCache.current = {
+            data: newCacheData,
+            timestamp: now,
+            ttl: cache.ttl
+          };
+
+          performanceRef.current.cacheMisses++;
+        }
+
+        return websitesCache.current.data;
+      };
+
+      // Get active websites with caching
+      setLoadingProgress({ current: 1, total: userTeamIds.length + 2 });
+      const activeWebsitesByTeam = await getActiveWebsitesForTeams(userTeamIds);
+      
+      // Get all active website IDs
+      const allActiveWebsiteIds = Object.values(activeWebsitesByTeam).flat();
+      
+      // Early return if no active websites
+      if (allActiveWebsiteIds.length === 0) {
+        setTransactions([]);
+        setLoading(false);
+        setInitialLoading(false);
+        setRefreshing(false);
+        isLoadingRef.current = false;
+        return;
       }
 
-      // Data is already sorted by createdAt desc from query
-      const teamsSnapshot = await getDocs(collection(db, 'teams'));
+      // Enhanced parallel queries with optimized structure
+      const queryStartTime = performance.now();
+      setLoadingProgress({ current: 2, total: userTeamIds.length + 2 });
+      
+      // Create optimized queries with pre-filtering
+      const teamQueries = userTeamIds.map(async (teamId, index) => {
+        const teamWebsites = activeWebsitesByTeam[teamId] || [];
+        
+        // Skip teams with no active websites
+        if (teamWebsites.length === 0) {
+          setLoadingProgress(prev => ({ ...prev, current: prev.current + 1 }));
+          return { teamId, docs: [] };
+        }
+
+        try {
+          // Try optimized compound query first
+          const snapshot = await getDocs(query(
+            collection(db, 'transactions'),
+            where('teamId', '==', teamId),
+            where('type', '==', 'withdraw'),
+            where('createdBy', '==', 'api'),
+            where('createdAt', '>=', startOfDay),
+            where('createdAt', '<=', endOfDay),
+            orderBy('createdAt', 'desc'),
+            limit(1000)
+          ));
+          
+          setLoadingProgress(prev => ({ ...prev, current: prev.current + 1 }));
+          return { teamId, docs: snapshot.docs };
+          
+        } catch (error) {
+          console.warn(`Optimized query failed for team ${teamId}, using fallback:`, error);
+          
+          // Fallback to basic query
+          const fallbackSnapshot = await getDocs(query(
+            collection(db, 'transactions'),
+            where('teamId', '==', teamId),
+            where('createdAt', '>=', startOfDay),
+            where('createdAt', '<=', endOfDay),
+            orderBy('createdAt', 'desc'),
+            limit(1000)
+          ));
+          
+          setLoadingProgress(prev => ({ ...prev, current: prev.current + 1 }));
+          return { teamId, docs: fallbackSnapshot.docs };
+        }
+      });
+
+      // Execute all queries in parallel
+      const teamResults = await Promise.all(teamQueries);
       
       performanceRef.current.totalQueryTime += performance.now() - queryStartTime;
 
-      // Create efficient lookup maps
+      // Create teams lookup map (use existing teams data)
       const teamsMap = new Map();
-      teamsSnapshot.docs.forEach(doc => {
-        teamsMap.set(doc.id, doc.data());
+      teams.forEach(team => {
+        teamsMap.set(team.id, team);
       });
 
-      // Process all documents and filter for bot transactions
-      const allTransactions = allTransactionDocs
-        .filter(doc => {
-          const data = doc.data();
-          // กรองเฉพาะธุรกรรมที่ websiteId อยู่ในเว็บไซต์ที่ isActive = true
-          return data.type === 'withdraw' && 
-                 data.createdBy === 'api' && 
-                 data.websiteId && 
-                 activeWebsiteIds.includes(data.websiteId);
-        })
-        .map(doc => {
+      // Enhanced data processing with pre-filtering
+      const processStartTime = performance.now();
+      const allTransactions: BotTransaction[] = [];
+
+      teamResults.forEach(({ teamId, docs }) => {
+        const teamWebsites = activeWebsitesByTeam[teamId] || [];
+        const team = teamsMap.get(teamId);
+        const teamName = team?.name || `ทีม ${teamId?.substring(0, 8) || 'ไม่ระบุ'}`;
+
+        docs.forEach(doc => {
           const data = doc.data() as any;
           
-          // Get team info from map
-          let teamName = 'ไม่ระบุทีม';
-          if (data.teamId && teamsMap.has(data.teamId)) {
-            const teamData = teamsMap.get(data.teamId);
-            teamName = teamData.name || `ทีม ${data.teamId.substring(0, 8)}`;
-          } else if (data.teamId) {
-            teamName = `ทีม ${data.teamId.substring(0, 8)}`;
+          // Enhanced filtering with pre-computed data
+          if (
+            data.type === 'withdraw' && 
+            data.createdBy === 'api' && 
+            data.websiteId && 
+            teamWebsites.includes(data.websiteId)
+          ) {
+            allTransactions.push({
+              id: doc.id,
+              ...data,
+              teamName
+            } as BotTransaction);
           }
-          
-          return {
-            id: doc.id,
-            ...data,
-            teamName
-          } as BotTransaction;
         });
-
-      // Sort all transactions by createdAt desc (newest first)
-      allTransactions.sort((a, b) => {
-        const aTime = a.createdAt?.toDate?.() || new Date(a.createdAt);
-        const bTime = b.createdAt?.toDate?.() || new Date(b.createdAt);
-        return bTime.getTime() - aTime.getTime();
       });
 
-      // Filter based on user role and permissions
-      let filteredRecords: BotTransaction[];
-      
-      if (userProfile.role === 'admin') {
-        filteredRecords = allTransactions.filter(record => 
-          record.teamId && userTeamIds.includes(record.teamId)
-        );
-      } else if (userProfile.role === 'manager') {
-        filteredRecords = allTransactions.filter(record => 
-          record.teamId && userTeamIds.includes(record.teamId)
-        );
-      } else {
-        filteredRecords = allTransactions.filter(record => 
-          record.teamId && userTeamIds.includes(record.teamId)
-        );
-      }
+      console.log(`⚡ Data processing took: ${performance.now() - processStartTime}ms`);
 
-      // Store all filtered records for client-side pagination
-      setTransactions(filteredRecords);
+      // Optimized sorting using native sort with cached time values
+      const sortStartTime = performance.now();
+      allTransactions.sort((a, b) => {
+        const aTime = a.createdAt?.toDate?.()?.getTime() || new Date(a.createdAt).getTime();
+        const bTime = b.createdAt?.toDate?.()?.getTime() || new Date(b.createdAt).getTime();
+        return bTime - aTime;
+      });
+      console.log(`🔄 Sorting took: ${performance.now() - sortStartTime}ms`);
 
-      // Reset loading progress
-      setLoadingProgress({ current: userTeamIds.length, total: userTeamIds.length });
-
-      // Since we're loading all available data in batches, no need for "load more"
+      // Set final results
+      setTransactions(allTransactions);
+      setLoadingProgress({ current: userTeamIds.length + 2, total: userTeamIds.length + 2 });
       setHasMoreData(false);
-
       setLastUpdated(new Date());
-      performanceRef.current.cacheMisses++;
+      
+      const totalTime = performance.now() - performanceRef.current.loadStartTime;
+      console.log(`🚀 Total load time: ${totalTime.toFixed(2)}ms | Transactions: ${allTransactions.length} | Cache: ${performanceRef.current.cacheHits}H/${performanceRef.current.cacheMisses}M`);
 
     } catch (err) {
       console.error('Error loading bot transactions:', err);
@@ -393,19 +439,24 @@ export default function BotTransactionsPage() {
       toast.error('ไม่สามารถโหลดข้อมูลธุรกรรมได้');
     } finally {
       setLoading(false);
+      setInitialLoading(false);
       setRefreshing(false);
       isLoadingRef.current = false;
     }
-  }, [user, userProfile, teams, teamsLoading, itemsPerPage, showAllData, selectedDate]);
+  }, [user, userProfile, teams, teamsLoading, transactions]);
 
-  // Removed loadMoreTransactions - now using pagination
-
-  // Initial load and team changes
+  // Initial load and team changes - ปรับให้ไม่รอ teamsLoading
   useEffect(() => {
-    if (!teamsLoading && user && userProfile && teams.length > 0) {
-      loadTransactions(true);
+    if (user && userProfile && teams.length > 0) {
+      // Start loading immediately when data is available
+      const doInitialLoad = async () => {
+        if (!isLoadingRef.current) {
+          await loadTransactions(false); // ใช้ false เพื่อไม่ force refresh
+        }
+      };
+      doInitialLoad();
     }
-  }, [loadTransactions, teamsLoading, user, userProfile, teams]);
+  }, [teamsLoading, user, userProfile, teams]); // ยังคง teamsLoading เพื่อรอให้ข้อมูล teams โหลดเสร็จ
 
   // Optimized real-time listener for new bot transactions
   useEffect(() => {
@@ -414,7 +465,7 @@ export default function BotTransactionsPage() {
     let unsubscribe: (() => void) | null = null;
     let isInitialLoad = true;
 
-    // Set up real-time listener for transactions collection
+    // Enhanced real-time listener with caching
     unsubscribe = onSnapshot(
       collection(db, 'transactions'), 
       (snapshot) => {
@@ -424,144 +475,131 @@ export default function BotTransactionsPage() {
           return;
         }
 
-        // Check for new records only
-        const newRecords = snapshot.docChanges().filter(change => change.type === 'added');
+        // Pre-compute frequently used values
+        const userTeamIds = teams.map(team => team.id);
+        const userTeamIdSet = new Set(userTeamIds); // Use Set for O(1) lookup
+        const teamsMap = new Map(teams.map(team => [team.id, team]));
         
-        if (newRecords.length > 0) {
-          // Check if any new records are bot transactions relevant to current user and from selected date
-          const userTeamIds = teams.map(team => team.id);
-          
-          // Get selected date range (00:00:00 to 23:59:59)
-          const selectedDateObj = new Date(selectedDate);
-          const startOfSelectedDate = new Date(selectedDateObj.getFullYear(), selectedDateObj.getMonth(), selectedDateObj.getDate(), 0, 0, 0);
-          const endOfSelectedDate = new Date(selectedDateObj.getFullYear(), selectedDateObj.getMonth(), selectedDateObj.getDate(), 23, 59, 59);
-          
-          const relevantNewRecords = newRecords.filter(change => {
-            const data = change.doc.data();
-            
-            // Check if it's a bot transaction (withdraw + api)
-            if (data.type !== 'withdraw' || data.createdBy !== 'api') {
-              return false;
-            }
-            
-            // Check if record is from selected date only
-            const recordTime = data.createdAt?.toDate?.() || new Date(data.createdAt);
-            if (recordTime < startOfSelectedDate || recordTime > endOfSelectedDate) {
-              return false;
-            }
-            
-            // Check if it belongs to user's teams
-            return data.teamId && userTeamIds.includes(data.teamId);
-          });
+        // Get today's date range once
+        const selectedDateObj = new Date(getLocalDateString());
+        const startOfDay = new Date(selectedDateObj.getFullYear(), selectedDateObj.getMonth(), selectedDateObj.getDate(), 0, 0, 0);
+        const endOfDay = new Date(selectedDateObj.getFullYear(), selectedDateObj.getMonth(), selectedDateObj.getDate(), 23, 59, 59);
 
-          if (relevantNewRecords.length > 0) {
-            // Process new records and add them to the list
-            const newTransactions = relevantNewRecords.map(change => {
-              const data = change.doc.data();
-              const team = teams.find(t => t.id === data.teamId);
-              const teamName = team?.name || `ทีม ${data.teamId?.substring(0, 8) || 'ไม่ระบุ'}`;
-              
-              return {
-                id: change.doc.id,
-                ...data,
-                teamName
-              } as BotTransaction;
-            });
-            
-            // Add new transactions to the beginning of the list (since they're newer)
-            setTransactions(prev => {
-              // Check for duplicates before adding
-              const newUniqueTransactions = newTransactions.filter(newTx => 
-                !prev.some(existingTx => existingTx.id === newTx.id)
-              );
-              
-              if (newUniqueTransactions.length > 0) {
-                // Sort by creation time (newest first) and merge
-                const combined = [...newUniqueTransactions, ...prev];
-                return combined.sort((a, b) => {
-                  const aTime = a.createdAt?.toDate?.() || new Date(a.createdAt);
-                  const bTime = b.createdAt?.toDate?.() || new Date(b.createdAt);
-                  return bTime.getTime() - aTime.getTime();
-                });
-              }
-              
-              return prev;
-            });
-            
-            // Update last updated time
-            setLastUpdated(new Date());
-            
-            // Show notification
-            const isToday = selectedDate === getLocalDateString();
-            toast.success(
-              `มีธุรกรรม Bot ใหม่${isToday ? 'วันนี้' : 'ในวันที่เลือก'} ${relevantNewRecords.length} รายการ`,
-              {
-                duration: 4000,
-                position: 'top-right',
-              }
-            );
-          }
+        // Get cached active websites
+        const now = Date.now();
+        const cache = websitesCache.current;
+        let activeWebsitesByTeam: { [teamId: string]: string[] } = {};
+        
+        if ((now - cache.timestamp) < cache.ttl) {
+          activeWebsitesByTeam = cache.data;
         }
 
-        // Check for modified records (status changes)
-        const modifiedRecords = snapshot.docChanges().filter(change => change.type === 'modified');
-        
-        if (modifiedRecords.length > 0) {
-          const userTeamIds = teams.map(team => team.id);
+        // Enhanced filtering function
+        const isValidBotTransaction = (data: any) => {
+          // Quick type and creator check first
+          if (data.type !== 'withdraw' || data.createdBy !== 'api') return false;
           
-          const relevantModifiedRecords = modifiedRecords.filter(change => {
-            const data = change.doc.data();
+          // Team membership check using Set for O(1) lookup
+          if (!data.teamId || !userTeamIdSet.has(data.teamId)) return false;
+          
+          // Date range check
+          const recordTime = data.createdAt?.toDate?.() || new Date(data.createdAt);
+          if (recordTime < startOfDay || recordTime > endOfDay) return false;
+          
+          // Website check (only if we have cached data)
+          if (activeWebsitesByTeam[data.teamId]) {
+            return data.websiteId && activeWebsitesByTeam[data.teamId].includes(data.websiteId);
+          }
+          
+          // If no cached data, allow through (will be filtered later)
+          return true;
+        };
+
+        // Process document changes more efficiently
+        const changes = snapshot.docChanges();
+        let hasNewRecords = false;
+        let hasModifiedRecords = false;
+
+        // Batch process new records
+        const newTransactions: BotTransaction[] = [];
+        const modifiedTransactions: BotTransaction[] = [];
+
+        changes.forEach(change => {
+          const data = change.doc.data();
+          
+          if (change.type === 'added' && isValidBotTransaction(data)) {
+            const team = teamsMap.get(data.teamId);
+            newTransactions.push({
+              id: change.doc.id,
+              ...data,
+              teamName: team?.name || `ทีม ${data.teamId?.substring(0, 8) || 'ไม่ระบุ'}`
+            } as BotTransaction);
+            hasNewRecords = true;
+          } else if (change.type === 'modified' && isValidBotTransaction(data)) {
+            const team = teamsMap.get(data.teamId);
+            modifiedTransactions.push({
+              id: change.doc.id,
+              ...data,
+              teamName: team?.name || `ทีม ${data.teamId?.substring(0, 8) || 'ไม่ระบุ'}`
+            } as BotTransaction);
+            hasModifiedRecords = true;
+          }
+        });
+
+        // Batch update new records
+        if (hasNewRecords && newTransactions.length > 0) {
+          setTransactions(prev => {
+            const existingIds = new Set(prev.map(tx => tx.id));
+            const newUnique = newTransactions.filter(newTx => !existingIds.has(newTx.id));
             
-            // Check if it's a bot transaction and belongs to user's teams
-            return data.type === 'withdraw' && 
-                   data.createdBy === 'api' && 
-                   data.teamId && 
-                   userTeamIds.includes(data.teamId);
+            if (newUnique.length > 0) {
+              const combined = [...newUnique, ...prev];
+              // Use optimized sorting
+              return combined.sort((a, b) => {
+                const aTime = a.createdAt?.toDate?.()?.getTime() || new Date(a.createdAt).getTime();
+                const bTime = b.createdAt?.toDate?.()?.getTime() || new Date(b.createdAt).getTime();
+                return bTime - aTime;
+              });
+            }
+            return prev;
           });
           
-          if (relevantModifiedRecords.length > 0) {
-            // Update existing transactions in real-time
-            setTransactions(prev => {
-              const updated = [...prev];
-              relevantModifiedRecords.forEach(change => {
-                const data = change.doc.data();
-                const index = updated.findIndex(t => t.id === change.doc.id);
-                if (index !== -1) {
-                  const team = teams.find(t => t.id === data.teamId);
-                  const teamName = team?.name || `ทีม ${data.teamId?.substring(0, 8) || 'ไม่ระบุ'}`;
-                  
-                  updated[index] = {
-                    id: change.doc.id,
-                    ...data,
-                    teamName
-                  } as BotTransaction;
-                }
-              });
-              return updated;
-            });
+          setLastUpdated(new Date());
+          toast.success(`มีธุรกรรม Bot ใหม่ ${newTransactions.length} รายการ`, {
+            duration: 3000,
+            position: 'top-right',
+          });
+        }
+
+        // Batch update modified records
+        if (hasModifiedRecords && modifiedTransactions.length > 0) {
+          setTransactions(prev => {
+            const updated = [...prev];
+            const modifiedMap = new Map(modifiedTransactions.map(tx => [tx.id, tx]));
             
-            // Update last updated time
-            setLastUpdated(new Date());
-          }
+            // Update existing records in place
+            for (let i = 0; i < updated.length; i++) {
+              const modified = modifiedMap.get(updated[i].id);
+              if (modified) {
+                updated[i] = modified;
+              }
+            }
+            
+            return updated;
+          });
+          setLastUpdated(new Date());
         }
       },
       (error) => {
-        // Real-time listener error - log only in development
         if (process.env.NODE_ENV === 'development') {
           console.error('Real-time listener error:', error);
         }
       }
     );
 
-    // Store unsubscribe function
     unsubscribeRef.current = unsubscribe;
-
-    return () => {
-      if (unsubscribe) {
-        unsubscribe();
-      }
-    };
-  }, [user, userProfile, teamsLoading, teams, loadTransactions, selectedDate]);
+    return () => unsubscribe?.();
+  }, [user, userProfile, teamsLoading, teams]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -575,7 +613,7 @@ export default function BotTransactionsPage() {
   // Reset page when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, statusFilter, selectedTeamFilter, itemsPerPage, selectedDate]);
+  }, [searchTerm, statusFilter, selectedTeamFilter, itemsPerPage]);
 
   const handleRefresh = () => {
     loadTransactions(true);
@@ -592,7 +630,7 @@ export default function BotTransactionsPage() {
       const userTeamIds = teams.map(team => team.id);
       
       // Get selected date range (00:00:00 to 23:59:59)
-      const selectedDateObj = new Date(selectedDate);
+      const selectedDateObj = new Date(getLocalDateString());
       const startOfDay = new Date(selectedDateObj.getFullYear(), selectedDateObj.getMonth(), selectedDateObj.getDate(), 0, 0, 0);
       const endOfDay = new Date(selectedDateObj.getFullYear(), selectedDateObj.getMonth(), selectedDateObj.getDate(), 23, 59, 59);
       
@@ -687,7 +725,7 @@ export default function BotTransactionsPage() {
     } finally {
       setLoadingMore(false);
     }
-  }, [user, userProfile, teams, teamsLoading, transactions, loadingMore, hasMoreData, selectedDate]);
+  }, [user, userProfile, teams, teamsLoading, transactions, loadingMore, hasMoreData]);
 
   // Remove load all data function since we always show all data
 
@@ -939,16 +977,6 @@ export default function BotTransactionsPage() {
     setCurrentPage(1);
   }, [searchTerm, statusFilter, selectedTeamFilter]);
 
-  if (teamsLoading) {
-    return (
-      <DashboardLayout title="ธุรกรรม Bot API" subtitle="กำลังโหลด...">
-        <div className="flex justify-center items-center h-64">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-        </div>
-      </DashboardLayout>
-    );
-  }
-
   if (!user) {
     return (
       <DashboardLayout title="ธุรกรรม Bot API" subtitle="กรุณาเข้าสู่ระบบ">
@@ -959,145 +987,13 @@ export default function BotTransactionsPage() {
     );
   }
 
-  if (teams.length === 0 && !teamsLoading) {
-    return (
-      <DashboardLayout title="ธุรกรรม Bot API" subtitle="ไม่พบทีม">
-        <div className="text-center text-gray-500">
-          ไม่พบทีมที่เข้าร่วม
-        </div>
-      </DashboardLayout>
-    );
-  }
-
+  // แสดงหน้าจอทันทีเมื่อมี user (ไม่รอ teamsLoading)
   return (
     <DashboardLayout 
       title="ธุรกรรม Bot API" 
       subtitle="รายการธุรกรรมการถอนเงินที่สร้างผ่าน API"
     >
       <div className="space-y-6 lg:space-y-8">
-
-        {/* Enhanced Stats Cards with Status Groups */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7 gap-4 mb-8">
-          {/* Pending Status */}
-          <div className="bg-gradient-to-r from-yellow-500 to-orange-500 rounded-2xl p-5 text-white">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="flex items-center gap-1 mb-1">
-                  <span className="text-lg">⏳</span>
-                  <p className="text-yellow-100 text-sm font-medium">รอโอน</p>
-                </div>
-                <p className="text-2xl font-bold">
-                  {transactions.filter(t => t.status === 'รอโอน').length}
-                </p>
-              </div>
-            </div>
-          </div>
-
-          {/* Processing Status */}
-          <div className="bg-gradient-to-r from-blue-500 to-cyan-500 rounded-2xl p-5 text-white">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="flex items-center gap-1 mb-1">
-                  <span className="text-lg">🔄</span>
-                  <p className="text-blue-100 text-sm font-medium">กำลังโอน</p>
-                </div>
-                <p className="text-2xl font-bold">
-                  {transactions.filter(t => t.status === 'กำลังโอน').length}
-                </p>
-              </div>
-            </div>
-          </div>
-
-          {/* Success Status */}
-          <div className="bg-gradient-to-r from-green-500 to-emerald-500 rounded-2xl p-5 text-white">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="flex items-center gap-1 mb-1">
-                  <span className="text-lg">✅</span>
-                  <p className="text-green-100 text-sm font-medium">สำเร็จ</p>
-                </div>
-                <p className="text-2xl font-bold">
-                  {transactions.filter(t => t.status === 'สำเร็จ').length}
-                </p>
-              </div>
-            </div>
-          </div>
-
-          {/* Failed/Cancelled Status */}
-          <div className="bg-gradient-to-r from-gray-500 to-gray-600 rounded-2xl p-5 text-white">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="flex items-center gap-1 mb-1">
-                  <span className="text-lg">❌</span>
-                  <p className="text-gray-100 text-sm font-medium">ยกเลิก/ล้มเหลว</p>
-                </div>
-                <p className="text-2xl font-bold">
-                  {transactions.filter(t => ['ยกเลิก', 'ล้มเหลว'].includes(t.status)).length}
-                </p>
-              </div>
-            </div>
-          </div>
-
-          {/* Total */}
-          <div className="bg-gradient-to-r from-purple-500 to-indigo-600 rounded-2xl p-5 text-white">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="flex items-center gap-1 mb-1">
-                  <span className="text-lg">💰</span>
-                  <p className="text-purple-100 text-sm font-medium">
-                    ยอดรวมทั้งหมด
-                  </p>
-                </div>
-                                  <p className="text-xl font-bold">
-                    ฿{formatAmount(transactions.reduce((sum, t) => sum + t.amount, 0))}
-                  </p>
-                  <p className="text-xs text-purple-200 mt-1">
-                    จาก {transactions.length} รายการ
-                  </p>
-              </div>
-            </div>
-          </div>
-
-          {/* Cancelled/Failed Amount */}
-          <div className="bg-gradient-to-r from-red-500 to-pink-600 rounded-2xl p-5 text-white">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="flex items-center gap-1 mb-1">
-                  <span className="text-lg">💸</span>
-                  <p className="text-red-100 text-sm font-medium">
-                    ยอดยกเลิก/ล้มเหลว
-                  </p>
-                </div>
-                <p className="text-xl font-bold">
-                  ฿{formatAmount(transactions.filter(t => ['ยกเลิก', 'ล้มเหลว'].includes(t.status)).reduce((sum, t) => sum + t.amount, 0))}
-                </p>
-                <p className="text-xs text-red-200 mt-1">
-                  {transactions.filter(t => ['ยกเลิก', 'ล้มเหลว'].includes(t.status)).length} รายการ
-                </p>
-              </div>
-            </div>
-          </div>
-
-          {/* Total Transactions */}
-          <div className="bg-gradient-to-r from-teal-500 to-cyan-600 rounded-2xl p-5 text-white">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="flex items-center gap-1 mb-1">
-                  <span className="text-lg">📊</span>
-                  <p className="text-teal-100 text-sm font-medium">
-                    รายการทั้งหมด
-                  </p>
-                </div>
-                <p className="text-2xl font-bold">
-                  {transactions.length}
-                </p>
-                <p className="text-xs text-teal-200 mt-1">
-                  ธุรกรรม Bot API
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
 
         {/* Filters and Search */}
         <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-sm rounded-2xl shadow-lg border border-white/30 dark:border-gray-700/30 p-6">
@@ -1120,28 +1016,6 @@ export default function BotTransactionsPage() {
 
             {/* Filters */}
             <div className="flex flex-wrap gap-3">
-              {/* Date picker */}
-              <div className="flex items-center space-x-2">
-                <label className="text-sm font-medium text-gray-700 dark:text-gray-300 whitespace-nowrap">
-                  วันที่:
-                </label>
-                <input
-                  type="date"
-                  value={selectedDate}
-                  onChange={(e) => setSelectedDate(e.target.value)}
-                  className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                />
-                {selectedDate !== getLocalDateString() && (
-                  <button
-                    onClick={() => setSelectedDate(getLocalDateString())}
-                    className="px-2 py-1 text-xs bg-blue-50 hover:bg-blue-100 dark:bg-blue-900/20 dark:hover:bg-blue-900/40 text-blue-600 dark:text-blue-400 rounded transition-colors"
-                    title="กลับไปวันนี้"
-                  >
-                    วันนี้
-                  </button>
-                )}
-              </div>
-
               {/* Items per page */}
               <div className="flex items-center space-x-2">
                 <label className="text-sm font-medium text-gray-700 dark:text-gray-300 whitespace-nowrap">
@@ -1173,7 +1047,7 @@ export default function BotTransactionsPage() {
                     <option value="all">ทุกทีม ({teams.length})</option>
                     {teams.map(team => (
                       <option key={team.id} value={team.id}>
-                        {team.name} ({transactions.filter(t => t.teamId === team.id).length})
+                        {team.name} ({(initialLoading || loading) ? 0 : transactions.filter(t => t.teamId === team.id).length})
                       </option>
                     ))}
                   </select>
@@ -1192,27 +1066,26 @@ export default function BotTransactionsPage() {
                 >
                   <option value="all">สถานะทั้งหมด</option>
                   <optgroup label="🔄 รอดำเนินการ">
-                    <option value="รอโอน">⏳ รอโอน ({transactions.filter(t => t.status === 'รอโอน').length})</option>
-                    <option value="กำลังโอน">🔄 กำลังโอน ({transactions.filter(t => t.status === 'กำลังโอน').length})</option>
+                    <option value="รอโอน">⏳ รอโอน ({(initialLoading || loading) ? 0 : transactions.filter(t => t.status === 'รอโอน').length})</option>
+                    <option value="กำลังโอน">🔄 กำลังโอน ({(initialLoading || loading) ? 0 : transactions.filter(t => t.status === 'กำลังโอน').length})</option>
                   </optgroup>
                   <optgroup label="✅ เสร็จสิ้น">
-                    <option value="สำเร็จ">✅ สำเร็จ ({transactions.filter(t => t.status === 'สำเร็จ').length})</option>
+                    <option value="สำเร็จ">✅ สำเร็จ ({(initialLoading || loading) ? 0 : transactions.filter(t => t.status === 'สำเร็จ').length})</option>
                   </optgroup>
                   <optgroup label="❌ ยกเลิก/ล้มเหลว">
-                    <option value="ยกเลิก">❌ ยกเลิก ({transactions.filter(t => t.status === 'ยกเลิก').length})</option>
-                    <option value="ล้มเหลว">⚠️ ล้มเหลว ({transactions.filter(t => t.status === 'ล้มเหลว').length})</option>
+                    <option value="ยกเลิก">❌ ยกเลิก ({(initialLoading || loading) ? 0 : transactions.filter(t => t.status === 'ยกเลิก').length})</option>
+                    <option value="ล้มเหลว">⚠️ ล้มเหลว ({(initialLoading || loading) ? 0 : transactions.filter(t => t.status === 'ล้มเหลว').length})</option>
                   </optgroup>
                 </select>
               </div>
 
               {/* Enhanced Clear Filters Button */}
-              {(searchTerm || statusFilter !== 'all' || selectedTeamFilter !== 'all' || selectedDate !== getLocalDateString()) && (
+              {(searchTerm || statusFilter !== 'all' || selectedTeamFilter !== 'all') && (
                 <button
                   onClick={() => {
                     setSearchTerm('');
                     setStatusFilter('all');
                     setSelectedTeamFilter('all');
-                    setSelectedDate(getLocalDateString());
                     setCurrentPage(1);
                   }}
                   className="flex items-center gap-2 px-4 py-2 text-sm bg-red-50 hover:bg-red-100 dark:bg-red-900/20 dark:hover:bg-red-900/40 text-red-600 dark:text-red-400 rounded-lg transition-colors"
@@ -1229,7 +1102,15 @@ export default function BotTransactionsPage() {
 
         {/* Main Content */}
         <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-sm rounded-2xl shadow-lg border border-white/30 dark:border-gray-700/30 p-6">
-          {loading ? (
+          {initialLoading ? (
+            <div className="flex flex-col items-center justify-center py-16">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mb-4"></div>
+              <p className="text-gray-500 dark:text-gray-400">กำลังโหลดข้อมูลธุรกรรม...</p>
+              <div className="mt-2 text-xs text-gray-400">
+                กำลังดึงข้อมูลจากฐานข้อมูล...
+              </div>
+            </div>
+          ) : loading ? (
             <div className="flex flex-col items-center justify-center py-16">
               <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mb-4"></div>
               <p className="text-gray-500 dark:text-gray-400">กำลังโหลดข้อมูลธุรกรรม...</p>
@@ -1250,6 +1131,21 @@ export default function BotTransactionsPage() {
                 ลองใหม่
               </button>
             </div>
+          ) : teamsLoading ? (
+            <div className="flex flex-col items-center justify-center py-16">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mb-4"></div>
+              <p className="text-gray-500 dark:text-gray-400">กำลังโหลดข้อมูลทีม...</p>
+            </div>
+          ) : teams.length === 0 && !teamsLoading ? (
+            <div className="text-center py-16">
+              <div className="text-gray-500 dark:text-gray-400">
+                <svg className="h-12 w-12 mx-auto mb-2 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 715.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                </svg>
+                <p>ไม่พบทีมที่เข้าร่วม</p>
+                <p className="text-sm">คุณยังไม่ได้เป็นสมาชิกของทีมใดๆ</p>
+              </div>
+            </div>
           ) : (
             <>
               {/* Table Header */}
@@ -1262,7 +1158,7 @@ export default function BotTransactionsPage() {
                   </div>
                   <div>
                     <h3 className="text-xl font-bold text-gray-900 dark:text-white">
-                      ธุรกรรม Bot API - วันที่ {new Date(selectedDate).toLocaleDateString('th-TH', { 
+                      ธุรกรรม Bot API - วันนี้ {new Date().toLocaleDateString('th-TH', { 
                         year: 'numeric', 
                         month: 'long', 
                         day: 'numeric' 
@@ -1270,7 +1166,7 @@ export default function BotTransactionsPage() {
                     </h3>
                     <div className="flex items-center gap-2">
                       <p className="text-sm text-gray-600 dark:text-gray-400">
-                        รายการธุรกรรมการถอนเงินที่สร้างผ่าน API ในวันที่เลือกเท่านั้น
+                        รายการธุรกรรมการถอนเงินที่สร้างผ่าน API วันนี้เท่านั้น
                       </p>
                       <div className="flex items-center gap-1">
                         <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
@@ -1280,18 +1176,74 @@ export default function BotTransactionsPage() {
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
+                  {/* Enhanced Stats info - larger and more beautiful */}
+                  <div className="flex items-center gap-6">
+                    {/* Pending transactions - Enhanced */}
+                    <div className="flex items-center gap-3 bg-gradient-to-r from-yellow-50 to-orange-50 dark:from-yellow-900/30 dark:to-orange-900/30 px-4 py-3 rounded-xl border border-yellow-200/50 dark:border-yellow-600/30 shadow-sm hover:shadow-md transition-all duration-200">
+                      <div className="flex items-center justify-center w-8 h-8 bg-yellow-100 dark:bg-yellow-800/50 rounded-lg">
+                        <span className="text-lg text-yellow-600 dark:text-yellow-400">⏳</span>
+                      </div>
+                      <div className="flex flex-col">
+                        <span className="text-xs font-medium text-yellow-600 dark:text-yellow-400 uppercase tracking-wide">รอโอน</span>
+                        {(initialLoading || loading) ? (
+                          <div className="h-5 w-8 bg-yellow-300 dark:bg-yellow-600 rounded animate-pulse mt-1"></div>
+                        ) : (
+                          <span className="text-xl font-bold text-yellow-700 dark:text-yellow-300">
+                            {transactions.filter(t => t.status === 'รอโอน').length}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    
+                    {/* Processing transactions - Enhanced */}
+                    <div className="flex items-center gap-3 bg-gradient-to-r from-blue-50 to-cyan-50 dark:from-blue-900/30 dark:to-cyan-900/30 px-4 py-3 rounded-xl border border-blue-200/50 dark:border-blue-600/30 shadow-sm hover:shadow-md transition-all duration-200">
+                      <div className="flex items-center justify-center w-8 h-8 bg-blue-100 dark:bg-blue-800/50 rounded-lg">
+                        <span className="text-lg text-blue-600 dark:text-blue-400">🔄</span>
+                      </div>
+                      <div className="flex flex-col">
+                        <span className="text-xs font-medium text-blue-600 dark:text-blue-400 uppercase tracking-wide">กำลังโอน</span>
+                        {(initialLoading || loading) ? (
+                          <div className="h-5 w-8 bg-blue-300 dark:bg-blue-600 rounded animate-pulse mt-1"></div>
+                        ) : (
+                          <span className="text-xl font-bold text-blue-700 dark:text-blue-300">
+                            {transactions.filter(t => t.status === 'กำลังโอน').length}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
                   {/* Last updated info */}
-                  <div className="flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400">
-                    <div>อัพเดทล่าสุด: {lastUpdated.toLocaleTimeString('th-TH')}</div>
+                  <div className="flex items-center gap-3 text-sm text-gray-500 dark:text-gray-400 ml-4">
+                    {(initialLoading || loading) ? (
+                      <div className="h-4 w-24 bg-gray-300 dark:bg-gray-600 rounded animate-pulse"></div>
+                    ) : (
+                      <div>อัพเดทล่าสุด: {lastUpdated.toLocaleTimeString('th-TH')}</div>
+                    )}
                     {process.env.NODE_ENV === 'development' && (
                       <div className="flex items-center gap-1">
                         <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
                         <span>Cache: {performanceRef.current.cacheHits}H/{performanceRef.current.cacheMisses}M</span>
                       </div>
                     )}
+                    {/* Enhanced performance indicators */}
+                    {process.env.NODE_ENV === 'development' && (
+                      <div className="flex items-center gap-2 text-xs">
+                        <div className="flex items-center gap-1">
+                          <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                          <span className="text-green-600 dark:text-green-400">
+                            Query: {performanceRef.current.totalQueryTime.toFixed(0)}ms
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <div className="w-2 h-2 bg-purple-500 rounded-full"></div>
+                          <span className="text-purple-600 dark:text-purple-400">
+                            Cache: {((performanceRef.current.cacheHits / Math.max(1, performanceRef.current.cacheHits + performanceRef.current.cacheMisses)) * 100).toFixed(0)}%
+                          </span>
+                        </div>
+                      </div>
+                    )}
                   </div>
-
-                  {/* Removed Show All Data Toggle - always show all data */}
 
                   {/* Manual refresh button */}
                   <button
@@ -1325,7 +1277,7 @@ export default function BotTransactionsPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {loading && transactions.length === 0 ? (
+                    {(initialLoading || loading) && transactions.length === 0 ? (
                       <tr>
                         <td colSpan={10} className="py-16 text-center">
                           <div className="flex flex-col items-center justify-center">
@@ -1504,35 +1456,7 @@ export default function BotTransactionsPage() {
                 </table>
               </div>
 
-              {/* Load More Button */}
-              {hasMoreData && !loading && transactions.length > 0 && !showAllData && (
-                <div className="mt-6 text-center">
-                  <button
-                    onClick={loadMoreData}
-                    disabled={loadingMore}
-                    className="inline-flex items-center gap-2 px-6 py-3 text-sm font-medium text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/40 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {loadingMore ? (
-                      <>
-                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
-                        กำลังโหลดข้อมูลเพิ่มเติม...
-                      </>
-                    ) : (
-                      <>
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                        </svg>
-                        โหลดข้อมูลเพิ่มเติม
-                      </>
-                    )}
-                  </button>
-                                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
-                      กำลังแสดง {transactions.length} รายการ (ทั้งหมด)
-                    </p>
-                </div>
-              )}
-
-              {/* Show all data info - removed since we always show all data */}
+              {/* Load More Button - Removed since we use single batch loading */}
 
               {/* Pagination */}
               {Math.ceil(filteredTransactions.length / itemsPerPage) > 1 && (
@@ -1540,56 +1464,68 @@ export default function BotTransactionsPage() {
                   <div className="text-sm text-gray-700 dark:text-gray-300">
                     <div className="flex items-center gap-2">
                       <div className="flex items-center gap-1">
-                        <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                        <span className="text-green-600 dark:text-green-400 font-medium">ข้อมูลทั้งหมด</span>
+                        <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
+                        <span className="text-blue-600 dark:text-blue-400 font-medium">ข้อมูลล่าสุด</span>
                       </div>
                       <span>-</span>
-                      <span>แสดง {((currentPage - 1) * itemsPerPage) + 1} ถึง {Math.min(currentPage * itemsPerPage, filteredTransactions.length)} จาก {filteredTransactions.length} รายการ</span>
+                      {loading ? (
+                        <div className="h-4 w-32 bg-gray-300 dark:bg-gray-600 rounded animate-pulse"></div>
+                      ) : (
+                        <span>แสดง {((currentPage - 1) * itemsPerPage) + 1} ถึง {Math.min(currentPage * itemsPerPage, filteredTransactions.length)} จาก {filteredTransactions.length} รายการ</span>
+                      )}
                     </div>
                   </div>
                   
                   <div className="flex items-center space-x-2">
                     <button
                       onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
-                      disabled={currentPage === 1}
+                      disabled={currentPage === 1 || loading}
                       className="inline-flex items-center px-3 py-2 text-sm font-medium text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       ก่อนหน้า
                     </button>
                     
-                    <div className="flex items-center space-x-1">
-                      {Array.from({ length: Math.min(Math.ceil(filteredTransactions.length / itemsPerPage), 7) }, (_, i) => {
-                        const totalPages = Math.ceil(filteredTransactions.length / itemsPerPage);
-                        let page;
-                        if (totalPages <= 7) {
-                          page = i + 1;
-                        } else if (currentPage <= 4) {
-                          page = i + 1;
-                        } else if (currentPage >= totalPages - 3) {
-                          page = totalPages - 6 + i;
-                        } else {
-                          page = currentPage - 3 + i;
-                        }
-                        
-                        return (
-                          <button
-                            key={page}
-                            onClick={() => setCurrentPage(page)}
-                            className={`px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
-                              currentPage === page
-                                ? 'bg-blue-600 text-white border border-blue-600'
-                                : 'text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700'
-                            }`}
-                          >
-                            {page}
-                          </button>
-                        );
-                      })}
-                    </div>
+                    {loading ? (
+                      <div className="flex items-center space-x-1">
+                        {Array.from({ length: 3 }, (_, i) => (
+                          <div key={i} className="w-8 h-8 bg-gray-300 dark:bg-gray-600 rounded-lg animate-pulse"></div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="flex items-center space-x-1">
+                        {Array.from({ length: Math.min(Math.ceil(filteredTransactions.length / itemsPerPage), 7) }, (_, i) => {
+                          const totalPages = Math.ceil(filteredTransactions.length / itemsPerPage);
+                          let page;
+                          if (totalPages <= 7) {
+                            page = i + 1;
+                          } else if (currentPage <= 4) {
+                            page = i + 1;
+                          } else if (currentPage >= totalPages - 3) {
+                            page = totalPages - 6 + i;
+                          } else {
+                            page = currentPage - 3 + i;
+                          }
+                          
+                          return (
+                            <button
+                              key={page}
+                              onClick={() => setCurrentPage(page)}
+                              className={`px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
+                                currentPage === page
+                                  ? 'bg-blue-600 text-white border border-blue-600'
+                                  : 'text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700'
+                              }`}
+                            >
+                              {page}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
                     
                     <button
                       onClick={() => setCurrentPage(Math.min(Math.ceil(filteredTransactions.length / itemsPerPage), currentPage + 1))}
-                      disabled={currentPage === Math.ceil(filteredTransactions.length / itemsPerPage)}
+                      disabled={currentPage === Math.ceil(filteredTransactions.length / itemsPerPage) || loading}
                       className="inline-flex items-center px-3 py-2 text-sm font-medium text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       ถัดไป

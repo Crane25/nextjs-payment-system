@@ -62,21 +62,21 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, setIsOpen }) => {
       iconSolid: DocumentTextIconSolid,
       current: pathname === '/topup-history'
     }] : []),
-    // ประวัติถอนเงินสำหรับผู้ใช้ที่มีสิทธิ์ดู topup - ซ่อนไว้ชั่วคราว
-    // ...(canViewTopup() ? [{
-    //   name: 'ประวัติถอนเงิน',
-    //   href: '/withdraw-history',
-    //   icon: CurrencyDollarIcon,
-    //   iconSolid: CurrencyDollarIcon,
-    //   current: pathname === '/withdraw-history'
-    // }] : []),
-    // บอททำรายการสำหรับผู้ใช้ที่มีสิทธิ์ดู topup
+    // บอททำรายการ (บางส่วน) - สำหรับผู้ใช้ที่มีสิทธิ์ดู topup
     ...(canViewTopup() ? [{
-      name: 'บอททำรายการ',
+      name: 'บอททำรายการ (บางส่วน)',
       href: '/bot-transactions',
       icon: BoltIcon,
       iconSolid: BoltIcon,
       current: pathname === '/bot-transactions'
+    }] : []),
+    // บอททำรายการ (ทั้งหมด) - สำหรับผู้ใช้ที่มีสิทธิ์ดู topup
+    ...(canViewTopup() ? [{
+      name: 'บอททำรายการ (ทั้งหมด)',
+      href: '/all-transactions',
+      icon: BoltIcon,
+      iconSolid: BoltIcon,
+      current: pathname === '/all-transactions'
     }] : []),
     // จัดการทีมสำหรับผู้ใช้ที่มีสิทธิ์
     ...(canViewTeams() ? [{
