@@ -128,6 +128,7 @@ export default function Dashboard() {
 
   // Add loading state for topup processing
   const [isTopupProcessing, setIsTopupProcessing] = useState(false);
+  const [isWithdrawProcessing, setIsWithdrawProcessing] = useState(false);
 
   const [showAddWebsite, setShowAddWebsite] = useState(false);
   const [newWebsite, setNewWebsite] = useState({
@@ -1058,7 +1059,7 @@ export default function Dashboard() {
     if (!user || !userProfile) return;
     
     try {
-      setIsTopupProcessing(true);
+      setIsWithdrawProcessing(true);
       
       const { websiteId, amount, note } = withdrawConfirm;
       
@@ -1066,6 +1067,11 @@ export default function Dashboard() {
       const currentWebsite = websites.find(w => w.id === websiteId);
       if (!currentWebsite) {
         throw new Error('Website not found locally');
+      }
+
+      // Pre-check balance to give immediate feedback
+      if ((currentWebsite.balance || 0) < amount) {
+        throw new Error('Insufficient balance');
       }
 
       let targetCollection;
@@ -1087,7 +1093,7 @@ export default function Dashboard() {
         const websiteData = websiteDoc.data();
         const currentBalance = websiteData.balance || 0;
         
-        // Check if there's enough balance
+        // Real-time balance check inside transaction
         if (currentBalance < amount) {
           throw new Error('Insufficient balance');
         }
@@ -1173,18 +1179,22 @@ export default function Dashboard() {
     } catch (error: any) {
       console.error('Error executing withdraw:', error);
       
-      // Show error message
+      // Enhanced error handling
       if (error.code === 'permission-denied') {
         toast.error('ไม่มีสิทธิ์ในการถอนเงิน');
       } else if (error.code === 'not-found') {
         toast.error('ไม่พบข้อมูลเว็บไซต์');
+      } else if (error.code === 'aborted') {
+        toast.error('รายการถูกยกเลิกเนื่องจากข้อมูลเปลี่ยนแปลง กรุณาลองใหม่');
       } else if (error.message === 'Insufficient balance') {
         toast.error('ยอดเงินไม่เพียงพอ');
+      } else if (error.message === 'Website not found locally') {
+        toast.error('ไม่พบข้อมูลเว็บไซต์ในระบบ');
       } else {
         toast.error('เกิดข้อผิดพลาดในการถอนเงิน กรุณาลองใหม่อีกครั้ง');
       }
     } finally {
-      setIsTopupProcessing(false);
+      setIsWithdrawProcessing(false);
     }
   };
 
@@ -1561,19 +1571,29 @@ export default function Dashboard() {
                               {/* ปุ่มเติมเงิน - แสดงให้ทุกคนที่เห็นเว็บไซต์ */}
                               <button 
                                 onClick={() => showTopupModal(website.id, website.name)}
-                                className="flex items-center space-x-1 px-2 py-1 bg-green-100 text-green-700 hover:bg-green-200 dark:bg-green-900/30 dark:text-green-400 rounded-lg text-xs font-medium transition-colors"
+                                disabled={isTopupProcessing || isWithdrawProcessing}
+                                className={`flex items-center space-x-1 px-2 py-1 rounded-lg text-xs font-medium transition-colors ${
+                                  isTopupProcessing || isWithdrawProcessing
+                                    ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                                    : 'bg-green-100 text-green-700 hover:bg-green-200 dark:bg-green-900/30 dark:text-green-400'
+                                }`}
                               >
                                 <CurrencyDollarIcon className="h-3 w-3" />
-                                <span>เติมเงิน</span>
+                                <span>{isTopupProcessing ? 'กำลังเติม...' : 'เติมเงิน'}</span>
                               </button>
-                              {/* ซ่อนปุ่มถอนเงินชั่วคราว */}
+                              {/* ปุ่มถอนเงิน - แสดงเฉพาะแอดมิน */}
                               {canAccessAdminPanel() && (
                                 <button 
                                   onClick={() => showWithdrawModal(website.id, website.name)}
-                                  className="flex items-center space-x-1 px-2 py-1 bg-orange-100 text-orange-700 hover:bg-orange-200 dark:bg-orange-900/30 dark:text-orange-400 rounded-lg text-xs font-medium transition-colors"
+                                  disabled={isTopupProcessing || isWithdrawProcessing}
+                                  className={`flex items-center space-x-1 px-2 py-1 rounded-lg text-xs font-medium transition-colors ${
+                                    isTopupProcessing || isWithdrawProcessing
+                                      ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                                      : 'bg-orange-100 text-orange-700 hover:bg-orange-200 dark:bg-orange-900/30 dark:text-orange-400'
+                                  }`}
                                 >
                                   <ArrowTrendingDownIcon className="h-3 w-3" />
-                                  <span>ถอนเงิน</span>
+                                  <span>{isWithdrawProcessing ? 'กำลังถอน...' : 'ถอนเงิน'}</span>
                                 </button>
                               )}
                               {canDeleteWebsites() && (!website.teamId || hasTeamPermission(website.teamId, 'websites', 'delete')) && (
@@ -2243,9 +2263,16 @@ export default function Dashboard() {
                 </button>
                 <button
                   onClick={executeWithdraw}
-                  className="px-6 py-2.5 bg-gradient-to-r from-orange-500 to-red-600 text-white rounded-xl hover:from-orange-600 hover:to-red-700 transition-all duration-300 shadow-lg hover:shadow-xl font-medium"
+                  disabled={isWithdrawProcessing}
+                  className="px-6 py-2.5 bg-gradient-to-r from-orange-500 to-red-600 text-white rounded-xl hover:from-orange-600 hover:to-red-700 transition-all duration-300 shadow-lg hover:shadow-xl font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2"
                 >
-                  ยืนยันถอนเงิน
+                  {isWithdrawProcessing && (
+                    <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                  )}
+                  <span>{isWithdrawProcessing ? 'กำลังประมวลผล...' : 'ยืนยันถอนเงิน'}</span>
                 </button>
               </div>
             </div>
