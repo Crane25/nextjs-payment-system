@@ -235,7 +235,23 @@ class DashboardDataManager {
 
       // Process topup history
       topupHistory.forEach((record: any) => {
-        const recordDate = new Date(record.timestamp);
+        // Fix timestamp conversion - handle Firestore Timestamp objects
+        let timestamp = record.timestamp;
+        if (timestamp && typeof timestamp === 'object' && timestamp.toDate) {
+          // If it's a Firestore Timestamp, convert to Date
+          timestamp = timestamp.toDate();
+        } else if (timestamp && typeof timestamp === 'object' && timestamp.seconds) {
+          // Handle Firestore Timestamp with seconds/nanoseconds
+          timestamp = new Date(timestamp.seconds * 1000 + (timestamp.nanoseconds || 0) / 1000000);
+        } else if (timestamp) {
+          // If it's already a string or Date, convert to Date
+          timestamp = new Date(timestamp);
+        } else {
+          // If no timestamp, skip this record
+          return;
+        }
+
+        const recordDate = timestamp;
         if (recordDate.toDateString() === todayString) {
           // Check if user has permission to see this record
           if (userRole === 'admin' || 
@@ -254,7 +270,23 @@ class DashboardDataManager {
 
       // Process withdraw history
       withdrawHistory.forEach((record: any) => {
-        const recordDate = new Date(record.timestamp);
+        // Fix timestamp conversion - handle Firestore Timestamp objects
+        let timestamp = record.timestamp;
+        if (timestamp && typeof timestamp === 'object' && timestamp.toDate) {
+          // If it's a Firestore Timestamp, convert to Date
+          timestamp = timestamp.toDate();
+        } else if (timestamp && typeof timestamp === 'object' && timestamp.seconds) {
+          // Handle Firestore Timestamp with seconds/nanoseconds
+          timestamp = new Date(timestamp.seconds * 1000 + (timestamp.nanoseconds || 0) / 1000000);
+        } else if (timestamp) {
+          // If it's already a string or Date, convert to Date
+          timestamp = new Date(timestamp);
+        } else {
+          // If no timestamp, skip this record
+          return;
+        }
+
+        const recordDate = timestamp;
         if (recordDate.toDateString() === todayString) {
           // Check if user has permission to see this record
           if (userRole === 'admin' || 

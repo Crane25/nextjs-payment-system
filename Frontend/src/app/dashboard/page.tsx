@@ -53,6 +53,7 @@ export default function Dashboard() {
     canCreateTopup,
     canAccessTeamData,
     canViewApiKeys,
+    canAccessAdminPanel,
     isUser,
     isMemberOfTeam,
     hasTeamPermission,
@@ -816,6 +817,11 @@ export default function Dashboard() {
       return;
     }
 
+    // เก็บค่าไว้ในตัวแปรก่อนเคลียร์ modal
+    const websiteId = topupModal.websiteId;
+    const websiteName = topupModal.websiteName;
+    const note = topupNote;
+
     setTopupModal({
       show: false,
       websiteId: '',
@@ -823,15 +829,22 @@ export default function Dashboard() {
     });
     setTopupConfirm({
       show: true,
-      websiteId: topupModal.websiteId,
-      websiteName: topupModal.websiteName,
+      websiteId: websiteId,
+      websiteName: websiteName,
       amount: amount,
-      note: topupNote
+      note: note
     });
   };
 
   const hideTopupConfirm = () => {
     setIsTopupProcessing(false);
+    
+    // เก็บค่าไว้ในตัวแปรก่อนเคลียร์ confirm modal
+    const websiteId = topupConfirm.websiteId;
+    const websiteName = topupConfirm.websiteName;
+    const amount = topupConfirm.amount;
+    const note = topupConfirm.note;
+    
     setTopupConfirm({
       show: false,
       websiteId: '',
@@ -841,11 +854,11 @@ export default function Dashboard() {
     });
     setTopupModal({
       show: true,
-      websiteId: topupConfirm.websiteId,
-      websiteName: topupConfirm.websiteName
+      websiteId: websiteId,
+      websiteName: websiteName
     });
-    setTopupAmount(topupConfirm.amount.toString());
-    setTopupNote(topupConfirm.note);
+    setTopupAmount(amount.toString());
+    setTopupNote(note);
   };
 
   const executeTopup = async () => {
@@ -856,6 +869,12 @@ export default function Dashboard() {
       
       const { websiteId, amount, note } = topupConfirm;
       
+      // Get current website data before transaction
+      const currentWebsite = websites.find(w => w.id === websiteId);
+      if (!currentWebsite) {
+        throw new Error('Website not found locally');
+      }
+
       // Log the topup action
       // logWebsiteTopup(user.uid, websiteId, amount, note);
       
@@ -890,14 +909,38 @@ export default function Dashboard() {
           websiteId: websiteId,
           websiteName: websiteData.name || 'Unknown',
           amount: amount,
+          balanceBefore: websiteData.balance || 0,
+          balanceAfter: newBalance,
           note: note || '',
           timestamp: serverTimestamp(),
           createdBy: user.uid,
           createdByName: userProfile.displayName || userProfile.username || 'Unknown',
+          topupBy: userProfile.displayName || userProfile.username || 'ผู้ใช้ไม่ระบุ',
+          topupByUid: user.uid,
+          topupByEmail: userProfile.email || user.email,
+          topupByUsername: userProfile.username || userProfile.displayName || user.email?.split('@')[0] || 'user',
           teamId: websiteData.teamId || null,
+          teamName: websiteData.teamId ? teams.find(t => t.id === websiteData.teamId)?.name || 'ไม่ระบุทีม' : null,
+          status: 'completed',
           type: 'topup'
         });
       });
+      
+      // อัพเดทข้อมูลในโลคัลก่อน เพื่อให้ UI ตอบสนองเร็วขึ้น
+      setWebsites(prevWebsites => 
+        prevWebsites.map(w => 
+          w.id === websiteId 
+            ? { ...w, balance: (w.balance || 0) + amount }
+            : w
+        )
+      );
+      
+      // อัพเดทยอดเติมวันนี้ในโลคัล
+      setTodayTopupAmount(prev => prev + amount);
+      setTodayTopupByWebsite(prev => ({
+        ...prev,
+        [websiteId]: (prev[websiteId] || 0) + amount
+      }));
       
       // Show success message
       toast.success(`เติมเงินสำเร็จ ${amount.toLocaleString()} บาท`, {
@@ -916,14 +959,19 @@ export default function Dashboard() {
       
       // Trigger animation
       triggerAnimation('totalBalance', websiteId);
+      triggerAnimation('todayTopup');
       
-      // Clear cache and refresh data
-      dashboardDataManager.clearUserCache(user.uid);
-      dashboardDataManager.clearCache('websites');
-      dashboardDataManager.clearCache('topupHistory');
-      
-      // Refresh dashboard data
-      await loadDashboardData(true);
+      // โหลดข้อมูลใหม่ในภายหลังโดยไม่ clear cache ทั้งหมด
+      // เพื่อให้ยอดเติมวันนี้ไม่หายไป
+      setTimeout(async () => {
+        // Clear เฉพาะ cache ที่เกี่ยวข้องกับ topup
+        dashboardDataManager.clearCache('topupHistory');
+        dashboardDataManager.clearCache('websites');
+        dashboardDataManager.clearUserCache(user.uid);
+        
+        // รีเฟรชข้อมูลใหม่
+        await loadDashboardData(true);
+      }, 1000);
       
     } catch (error: any) {
       console.error('Error executing topup:', error);
@@ -1014,6 +1062,12 @@ export default function Dashboard() {
       
       const { websiteId, amount, note } = withdrawConfirm;
       
+      // Get current website data before transaction
+      const currentWebsite = websites.find(w => w.id === websiteId);
+      if (!currentWebsite) {
+        throw new Error('Website not found locally');
+      }
+
       let targetCollection;
       let targetHistoryCollection;
       
@@ -1052,14 +1106,38 @@ export default function Dashboard() {
           websiteId: websiteId,
           websiteName: websiteData.name || 'Unknown',
           amount: amount,
+          balanceBefore: currentBalance,
+          balanceAfter: newBalance,
           note: note || '',
           timestamp: serverTimestamp(),
           createdBy: user.uid,
           createdByName: userProfile.displayName || userProfile.username || 'Unknown',
+          withdrawBy: userProfile.displayName || userProfile.username || 'ผู้ใช้ไม่ระบุ',
+          withdrawByUid: user.uid,
+          withdrawByEmail: userProfile.email || user.email,
+          withdrawByUsername: userProfile.username || userProfile.displayName || user.email?.split('@')[0] || 'user',
           teamId: websiteData.teamId || null,
+          teamName: websiteData.teamId ? teams.find(t => t.id === websiteData.teamId)?.name || 'ไม่ระบุทีม' : null,
+          status: 'completed',
           type: 'withdraw'
         });
       });
+      
+      // อัพเดทข้อมูลในโลคัลก่อน เพื่อให้ UI ตอบสนองเร็วขึ้น
+      setWebsites(prevWebsites => 
+        prevWebsites.map(w => 
+          w.id === websiteId 
+            ? { ...w, balance: (w.balance || 0) - amount }
+            : w
+        )
+      );
+      
+      // อัพเดทยอดถอนวันนี้ในโลคัล
+      setTodayWithdrawAmount(prev => prev + amount);
+      setTodayWithdrawByWebsite(prev => ({
+        ...prev,
+        [websiteId]: (prev[websiteId] || 0) + amount
+      }));
       
       // Show success message
       toast.success(`ถอนเงินสำเร็จ ${amount.toLocaleString()} บาท`, {
@@ -1078,14 +1156,19 @@ export default function Dashboard() {
       
       // Trigger animation
       triggerAnimation('totalBalance', websiteId);
+      triggerAnimation('todayWithdraw');
       
-      // Clear cache and refresh data
-      dashboardDataManager.clearUserCache(user.uid);
-      dashboardDataManager.clearCache('websites');
-      dashboardDataManager.clearCache('withdrawHistory');
-      
-      // Refresh dashboard data
-      await loadDashboardData(true);
+      // โหลดข้อมูลใหม่ในภายหลังโดยไม่ clear cache ทั้งหมด
+      // เพื่อให้ยอดเติมวันนี้ไม่หายไป
+      setTimeout(async () => {
+        // Clear เฉพาะ cache ที่เกี่ยวข้องกับ withdraw
+        dashboardDataManager.clearCache('withdrawHistory');
+        dashboardDataManager.clearCache('websites');
+        dashboardDataManager.clearUserCache(user.uid);
+        
+        // รีเฟรชข้อมูลใหม่
+        await loadDashboardData(true);
+      }, 1000);
       
     } catch (error: any) {
       console.error('Error executing withdraw:', error);
@@ -1143,6 +1226,12 @@ export default function Dashboard() {
       value: `฿${getFilteredWebsites().reduce((sum, site: any) => sum + (todayTopupByWebsite[site.id] || 0), 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
       icon: ArrowTrendingUpIcon,
       color: 'from-blue-500 to-cyan-600'
+    },
+    {
+      title: 'ยอดถอนรวมวันนี้',
+      value: `฿${getFilteredWebsites().reduce((sum, site: any) => sum + (todayWithdrawByWebsite[site.id] || 0), 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+      icon: ArrowTrendingDownIcon,
+      color: 'from-red-500 to-pink-600'
     },
     {
       title: 'เว็บทั้งหมด',
@@ -1208,12 +1297,13 @@ export default function Dashboard() {
       `}</style>
       <div className="space-y-6 lg:space-y-8">
         {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6">
           {statCards.map((stat, index) => {
             // Determine animation class based on card type
             let animationClass = '';
             if (index === 0 && animationState.totalBalance) animationClass = 'amount-update';
             if (index === 1 && animationState.todayTopup) animationClass = 'amount-update';
+            if (index === 2 && animationState.todayWithdraw) animationClass = 'amount-update';
             
             return (
               <div key={index} className={`bg-gradient-to-r ${stat.color} rounded-2xl p-6 text-white`}>
@@ -1477,7 +1567,7 @@ export default function Dashboard() {
                                 <span>เติมเงิน</span>
                               </button>
                               {/* ซ่อนปุ่มถอนเงินชั่วคราว */}
-                              {false && canDeleteWebsites() && (!website.teamId || hasTeamPermission(website.teamId, 'websites', 'delete')) && (
+                              {canAccessAdminPanel() && (
                                 <button 
                                   onClick={() => showWithdrawModal(website.id, website.name)}
                                   className="flex items-center space-x-1 px-2 py-1 bg-orange-100 text-orange-700 hover:bg-orange-200 dark:bg-orange-900/30 dark:text-orange-400 rounded-lg text-xs font-medium transition-colors"

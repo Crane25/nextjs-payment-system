@@ -41,6 +41,7 @@ interface TopupRecord {
   teamId?: string;
   teamName?: string;
   note?: string;
+  balanceBefore?: number;
 }
 
 
@@ -280,9 +281,23 @@ export default function TopupHistory() {
           topupByUsername = userData.username || userData.email?.split('@')[0] || '';
         }
         
+        // Fix timestamp conversion - handle Firestore Timestamp objects
+        let timestamp = data.timestamp;
+        if (timestamp && typeof timestamp === 'object' && timestamp.toDate) {
+          // If it's a Firestore Timestamp, convert to Date then to ISO string
+          timestamp = timestamp.toDate().toISOString();
+        } else if (timestamp && typeof timestamp === 'object' && timestamp.seconds) {
+          // Handle Firestore Timestamp with seconds/nanoseconds
+          timestamp = new Date(timestamp.seconds * 1000 + (timestamp.nanoseconds || 0) / 1000000).toISOString();
+        } else if (!timestamp) {
+          // If no timestamp, use current time
+          timestamp = new Date().toISOString();
+        }
+        
         return {
           id: doc.id,
           ...data,
+          timestamp, // Use the converted timestamp
           teamName,
           topupByEmail,
           topupByUsername
@@ -307,8 +322,13 @@ export default function TopupHistory() {
         );
       }
       
-      // Data is already sorted by Firestore query (orderBy timestamp desc)
-      // No need to sort again
+      // Sort by timestamp descending (newest first) after filtering
+      // This ensures proper ordering even after client-side filtering
+      filteredRecords.sort((a, b) => {
+        const aTime = new Date(a.timestamp).getTime();
+        const bTime = new Date(b.timestamp).getTime();
+        return bTime - aTime;
+      });
       
       // Always replace data for pagination (no infinite scroll)
       setTopupHistory(filteredRecords);
@@ -368,10 +388,23 @@ export default function TopupHistory() {
               teamName = `ทีม ${data.teamId.substring(0, 8)}`;
             }
             
+            // Fix timestamp conversion - handle Firestore Timestamp objects
+            let timestamp = data.timestamp;
+            if (timestamp && typeof timestamp === 'object' && timestamp.toDate) {
+              // If it's a Firestore Timestamp, convert to Date then to ISO string
+              timestamp = timestamp.toDate().toISOString();
+            } else if (timestamp && typeof timestamp === 'object' && timestamp.seconds) {
+              // Handle Firestore Timestamp with seconds/nanoseconds
+              timestamp = new Date(timestamp.seconds * 1000 + (timestamp.nanoseconds || 0) / 1000000).toISOString();
+            } else if (!timestamp) {
+              // If no timestamp, use current time
+              timestamp = new Date().toISOString();
+            }
+            
             return {
               ...data,
               teamName,
-              timestamp: data.timestamp,
+              timestamp, // Use the converted timestamp
               amount: data.amount || 0,
               status: data.status || 'pending',
               teamId: data.teamId
@@ -517,10 +550,24 @@ export default function TopupHistory() {
                 const team = teams.find(t => t.id === data.teamId);
                 teamName = team?.name || `ทีม ${data.teamId.substring(0, 8)}`;
               }
+
+              // Fix timestamp conversion - handle Firestore Timestamp objects
+              let timestamp = data.timestamp;
+              if (timestamp && typeof timestamp === 'object' && timestamp.toDate) {
+                // If it's a Firestore Timestamp, convert to Date then to ISO string
+                timestamp = timestamp.toDate().toISOString();
+              } else if (timestamp && typeof timestamp === 'object' && timestamp.seconds) {
+                // Handle Firestore Timestamp with seconds/nanoseconds
+                timestamp = new Date(timestamp.seconds * 1000 + (timestamp.nanoseconds || 0) / 1000000).toISOString();
+              } else if (!timestamp) {
+                // If no timestamp, use current time
+                timestamp = new Date().toISOString();
+              }
               
               return {
                 id: change.doc.id,
                 ...data,
+                timestamp, // Use the converted timestamp
                 teamName
               } as TopupRecord;
             });
@@ -631,6 +678,11 @@ export default function TopupHistory() {
       }
       
       return matchesSearch && matchesStatus && matchesPeriod && matchesTeam;
+    }).sort((a, b) => {
+      // Sort by timestamp descending (newest first) after filtering
+      const aTime = new Date(a.timestamp).getTime();
+      const bTime = new Date(b.timestamp).getTime();
+      return bTime - aTime;
     });
   };
 
@@ -1138,8 +1190,8 @@ export default function TopupHistory() {
                       </td>
                       <td className="py-4 px-4 text-center">
                         <div className="text-sm text-gray-600 dark:text-gray-400">
-                          {record.balanceAfter !== undefined ? 
-                            `฿${(record.balanceAfter - record.amount).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : 
+                          {record.balanceBefore !== undefined ? 
+                            `฿${record.balanceBefore.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : 
                             '-'
                           }
                         </div>

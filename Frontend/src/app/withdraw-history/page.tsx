@@ -165,10 +165,28 @@ export default function WithdrawHistory() {
       );
       
       const statsSnapshot = await getDocs(statsQuery);
-      const allRecords = statsSnapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as WithdrawRecord[];
+      const allRecords = statsSnapshot.docs.map(doc => {
+        const data = doc.data();
+        
+        // Fix timestamp conversion - handle Firestore Timestamp objects
+        let timestamp = data.timestamp;
+        if (timestamp && typeof timestamp === 'object' && timestamp.toDate) {
+          // If it's a Firestore Timestamp, convert to Date then to ISO string
+          timestamp = timestamp.toDate().toISOString();
+        } else if (timestamp && typeof timestamp === 'object' && timestamp.seconds) {
+          // Handle Firestore Timestamp with seconds/nanoseconds
+          timestamp = new Date(timestamp.seconds * 1000 + (timestamp.nanoseconds || 0) / 1000000).toISOString();
+        } else if (!timestamp) {
+          // If no timestamp, use current time
+          timestamp = new Date().toISOString();
+        }
+        
+        return {
+          id: doc.id,
+          ...data,
+          timestamp // Use the converted timestamp
+        };
+      }) as WithdrawRecord[];
       
       // Filter records accessible to current user
       const userAccessibleRecords = allRecords.filter(record => 
@@ -313,10 +331,24 @@ export default function WithdrawHistory() {
           withdrawByEmail = userData.email || '';
           withdrawByUsername = userData.username || userData.email?.split('@')[0] || '';
         }
+
+        // Fix timestamp conversion - handle Firestore Timestamp objects
+        let timestamp = data.timestamp;
+        if (timestamp && typeof timestamp === 'object' && timestamp.toDate) {
+          // If it's a Firestore Timestamp, convert to Date then to ISO string
+          timestamp = timestamp.toDate().toISOString();
+        } else if (timestamp && typeof timestamp === 'object' && timestamp.seconds) {
+          // Handle Firestore Timestamp with seconds/nanoseconds
+          timestamp = new Date(timestamp.seconds * 1000 + (timestamp.nanoseconds || 0) / 1000000).toISOString();
+        } else if (!timestamp) {
+          // If no timestamp, use current time
+          timestamp = new Date().toISOString();
+        }
         
         return {
           id: doc.id,
           ...data,
+          timestamp, // Use the converted timestamp
           teamName,
           withdrawByEmail,
           withdrawByUsername
