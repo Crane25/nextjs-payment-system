@@ -19,7 +19,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useUserProfile } from '../../contexts/UserContext';
 import { usePermission } from '../../hooks/usePermission';
 import { useMultiTeam } from '../../hooks/useMultiTeam';
-import { collection, getDocs, addDoc, deleteDoc, doc, updateDoc, onSnapshot, query, orderBy, where } from 'firebase/firestore';
+import { collection, getDocs, addDoc, deleteDoc, doc, updateDoc, onSnapshot, query, orderBy, where, limit, runTransaction, serverTimestamp } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import toast from 'react-hot-toast';
 import { cacheManager, CACHE_KEYS } from '../../utils/cacheManager';
@@ -1035,26 +1035,49 @@ export default function Dashboard() {
       const website = websites.find(w => w.id === topupConfirm.websiteId);
       if (!website) return;
 
-      const newBalance = website.balance + topupConfirm.amount;
-      const newDailyTopup = website.dailyTopup + topupConfirm.amount;
       const today = new Date().toISOString().split('T')[0];
 
-      // Update in Firestore - ใช้ main websites collection หรือ user subcollection
-      let websiteRef;
-      if (website.teamId) {
-        websiteRef = doc(db, 'websites', topupConfirm.websiteId);
-      } else {
-        websiteRef = doc(db, 'users', user.uid, 'websites', topupConfirm.websiteId);
-      }
+      // Use Firestore Transaction to prevent race conditions with Bot API
+      const result = await runTransaction(db, async (transaction) => {
+        // Get website reference
+        let websiteRef;
+        if (website.teamId) {
+          websiteRef = doc(db, 'websites', topupConfirm.websiteId);
+        } else {
+          websiteRef = doc(db, 'users', user.uid, 'websites', topupConfirm.websiteId);
+        }
 
-      await updateDoc(websiteRef, {
-        balance: newBalance,
-        dailyTopup: newDailyTopup,
-        lastUpdate: new Date().toISOString(),
-        lastTopupDate: today
+        // Read current website data within transaction
+        const websiteDoc = await transaction.get(websiteRef);
+        
+        if (!websiteDoc.exists()) {
+          throw new Error('Website document not found');
+        }
+        
+        const websiteData = websiteDoc.data() as any;
+        const currentBalance = websiteData.balance || 0;
+        const currentDailyTopup = websiteData.dailyTopup || 0;
+
+        // Calculate new balances
+        const newBalance = currentBalance + topupConfirm.amount;
+        const newDailyTopup = currentDailyTopup + topupConfirm.amount;
+
+        // Update website balance atomically
+        transaction.update(websiteRef, {
+          balance: newBalance,
+          dailyTopup: newDailyTopup,
+          lastUpdate: new Date().toISOString(),
+          lastTopupDate: today
+        });
+
+        return {
+          currentBalance,
+          newBalance,
+          newDailyTopup
+        };
       });
 
-      // Save topup history
+      // Save topup history (outside transaction for better performance)
       const topupHistoryRef = website.teamId 
         ? collection(db, 'topupHistory')
         : collection(db, 'users', user.uid, 'topupHistory');
@@ -1064,7 +1087,8 @@ export default function Dashboard() {
         websiteName: topupConfirm.websiteName,
         teamId: website.teamId || null,
         amount: topupConfirm.amount,
-        balanceAfter: newBalance, // ยอดเงินรวมหลังเติม
+        balanceBefore: result.currentBalance,
+        balanceAfter: result.newBalance, // ยอดเงินรวมหลังเติม
         timestamp: new Date().toISOString(),
         status: 'completed',
         topupBy: userProfile?.displayName || user.displayName || user.email || 'ผู้ใช้',
@@ -1075,7 +1099,7 @@ export default function Dashboard() {
       // Update local state
       setWebsites(websites.map(w => 
         w.id === topupConfirm.websiteId 
-          ? { ...w, balance: newBalance, dailyTopup: newDailyTopup, lastUpdate: 'เพิ่งอัพเดท', lastTopupDate: today }
+          ? { ...w, balance: result.newBalance, dailyTopup: result.newDailyTopup, lastUpdate: 'เพิ่งอัพเดท', lastTopupDate: today }
           : w
       ));
 
@@ -1085,10 +1109,10 @@ export default function Dashboard() {
 
       // Update stats
       const totalBalance = websites.reduce((sum, site: any) => 
-        site.id === topupConfirm.websiteId ? sum + newBalance : sum + (site.balance || 0), 0
+        site.id === topupConfirm.websiteId ? sum + result.newBalance : sum + (site.balance || 0), 0
       );
       const totalDailyTopup = websites.reduce((sum, site: any) => 
-        site.id === topupConfirm.websiteId ? sum + newDailyTopup : sum + (site.dailyTopup || 0), 0
+        site.id === topupConfirm.websiteId ? sum + result.newDailyTopup : sum + (site.dailyTopup || 0), 0
       );
 
       setStats({
@@ -1130,8 +1154,8 @@ export default function Dashboard() {
       setTopupNote('');
       
     } catch (error) {
-      // Error executing topup
-      toast.error('ไม่สามารถเติมเงินได้');
+      console.error('Error executing topup:', error);
+      toast.error('ไม่สามารถเติมเงินได้ กรุณาลองใหม่อีกครั้ง');
     } finally {
       setIsTopupProcessing(false);
     }
@@ -1216,31 +1240,50 @@ export default function Dashboard() {
         return;
       }
 
-      // Check balance again
-      if ((website.balance || 0) < withdrawConfirm.amount) {
-        toast.error('ยอดเงินในเว็บไซต์ไม่เพียงพอสำหรับการถอน');
-        setWithdrawConfirm({ show: false, websiteId: '', websiteName: '', amount: 0, note: '' });
-        return;
-      }
-
-      const newBalance = website.balance - withdrawConfirm.amount;
       const today = new Date().toISOString().split('T')[0];
 
-      // Update in Firestore - ใช้ main websites collection หรือ user subcollection
-      let websiteRef;
-      if (website.teamId) {
-        websiteRef = doc(db, 'websites', withdrawConfirm.websiteId);
-      } else {
-        websiteRef = doc(db, 'users', user.uid, 'websites', withdrawConfirm.websiteId);
-      }
+      // Use Firestore Transaction to prevent race conditions with Bot API
+      const result = await runTransaction(db, async (transaction) => {
+        // Get website reference
+        let websiteRef;
+        if (website.teamId) {
+          websiteRef = doc(db, 'websites', withdrawConfirm.websiteId);
+        } else {
+          websiteRef = doc(db, 'users', user.uid, 'websites', withdrawConfirm.websiteId);
+        }
 
-      await updateDoc(websiteRef, {
-        balance: newBalance,
-        lastUpdate: new Date().toISOString(),
-        lastWithdrawDate: today
+        // Read current website data within transaction
+        const websiteDoc = await transaction.get(websiteRef);
+        
+        if (!websiteDoc.exists()) {
+          throw new Error('Website document not found');
+        }
+        
+        const websiteData = websiteDoc.data() as any;
+        const currentBalance = websiteData.balance || 0;
+
+        // Check balance again within transaction (most up-to-date)
+        if (currentBalance < withdrawConfirm.amount) {
+          throw new Error('Insufficient balance. Current balance may have changed.');
+        }
+
+        // Calculate new balance
+        const newBalance = currentBalance - withdrawConfirm.amount;
+
+        // Update website balance atomically
+        transaction.update(websiteRef, {
+          balance: newBalance,
+          lastUpdate: new Date().toISOString(),
+          lastWithdrawDate: today
+        });
+
+        return {
+          currentBalance,
+          newBalance
+        };
       });
 
-      // Save withdraw history
+      // Save withdraw history (outside transaction for better performance)
       const withdrawHistoryRef = website.teamId 
         ? collection(db, 'withdrawHistory')
         : collection(db, 'users', user.uid, 'withdrawHistory');
@@ -1250,7 +1293,8 @@ export default function Dashboard() {
         websiteName: withdrawConfirm.websiteName,
         teamId: website.teamId || null,
         amount: withdrawConfirm.amount,
-        balanceAfter: newBalance,
+        balanceBefore: result.currentBalance,
+        balanceAfter: result.newBalance,
         timestamp: new Date().toISOString(),
         status: 'completed',
         withdrawBy: userProfile?.displayName || user.displayName || user.email || 'ผู้ใช้',
@@ -1261,7 +1305,7 @@ export default function Dashboard() {
       // Update local state
       setWebsites(websites.map(w => 
         w.id === withdrawConfirm.websiteId 
-          ? { ...w, balance: newBalance, lastUpdate: 'เพิ่งอัพเดท', lastWithdrawDate: today }
+          ? { ...w, balance: result.newBalance, lastUpdate: 'เพิ่งอัพเดท', lastWithdrawDate: today }
           : w
       ));
 
@@ -1271,7 +1315,7 @@ export default function Dashboard() {
 
       // Update stats
       const totalBalance = websites.reduce((sum, site: any) => 
-        site.id === withdrawConfirm.websiteId ? sum + newBalance : sum + (site.balance || 0), 0
+        site.id === withdrawConfirm.websiteId ? sum + result.newBalance : sum + (site.balance || 0), 0
       );
 
       setStats({
@@ -1295,7 +1339,11 @@ export default function Dashboard() {
       
     } catch (error) {
       console.error('Error during withdraw:', error);
-      toast.error('ไม่สามารถถอนเงินได้');
+      if (error instanceof Error && error.message.includes('Insufficient balance')) {
+        toast.error('ยอดเงินในเว็บไซต์ไม่เพียงพอสำหรับการถอน (ยอดอาจเปลี่ยนแปลงขณะทำรายการ)');
+      } else {
+        toast.error('ไม่สามารถถอนเงินได้ กรุณาลองใหม่อีกครั้ง');
+      }
     }
   };
 

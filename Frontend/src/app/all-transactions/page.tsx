@@ -6,7 +6,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useUserProfile } from '../../contexts/UserContext';
 import { usePermission } from '../../hooks/usePermission';
 import { useMultiTeam } from '../../hooks/useMultiTeam';
-import { collection, query, where, orderBy, getDocs, onSnapshot, updateDoc, doc, limit, startAfter, Query, QuerySnapshot, DocumentData, addDoc, getDoc } from 'firebase/firestore';
+import { collection, query, where, orderBy, getDocs, onSnapshot, updateDoc, doc, limit, startAfter, Query, QuerySnapshot, DocumentData, addDoc, getDoc, runTransaction, serverTimestamp } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import DashboardLayout from '../../components/DashboardLayout';
 // Removed VirtualScrollTable import - now using regular HTML table
@@ -755,40 +755,58 @@ export default function BotTransactionsPage() {
               }
               
               if (websiteData && websiteDocId) {
-                const currentBalance = websiteData.balance || 0;
-                const refundAmount = transaction.amount;
-                const newBalance = currentBalance + refundAmount;
+                // Use runTransaction to prevent race conditions with manual topup/withdraw
+                const refundResult = await runTransaction(db, async (firestoreTransaction) => {
+                  const websiteRef = doc(db, 'websites', websiteDocId);
+                  const websiteDoc = await firestoreTransaction.get(websiteRef);
+                  
+                  if (!websiteDoc.exists()) {
+                    throw new Error(`Website document not found: ${websiteDocId}`);
+                  }
+                  
+                  const currentData = websiteDoc.data();
+                  const currentBalance = currentData.balance || 0;
+                  const refundAmount = transaction.amount;
+                  const newBalance = currentBalance + refundAmount;
 
-                // Update website balance
-                await updateDoc(doc(db, 'websites', websiteDocId), {
-                  balance: newBalance,
-                  updatedAt: new Date()
+                  // Update website balance atomically
+                  firestoreTransaction.update(websiteRef, {
+                    balance: newBalance,
+                    updatedAt: serverTimestamp()
+                  });
+
+                  return {
+                    currentBalance,
+                    newBalance,
+                    refundAmount,
+                    websiteName: transaction.websiteName
+                  };
                 });
 
-                // Create refund transaction record
+                // Create refund transaction record (outside of transaction for better performance)
                 const refundDoc = await addDoc(collection(db, 'transactions'), {
                   transactionId: `REFUND_${Date.now()}`,
                   type: 'refund',
                   customerUsername: transaction.customerUsername,
-                  amount: refundAmount,
+                  amount: refundResult.refundAmount,
                   status: 'สำเร็จ',
                   websiteName: transaction.websiteName,
                   websiteId: transaction.websiteId,
                   teamId: transaction.teamId,
                   teamName: transaction.teamName,
-                  balanceBefore: currentBalance,
-                  balanceAfter: newBalance,
+                  balanceBefore: refundResult.currentBalance,
+                  balanceAfter: refundResult.newBalance,
                   relatedTransactionId: transactionId,
                   note: `คืนเครดิตให้เว็บไซต์จากการยกเลิกธุรกรรม ${transaction.transactionId}`,
-                  createdAt: new Date(),
-                  updatedAt: new Date(),
+                  createdAt: serverTimestamp(),
+                  updatedAt: serverTimestamp(),
                   createdBy: userProfile?.displayName || user?.displayName || 'ระบบ',
                   lastModifiedBy: userProfile?.displayName || user?.displayName || 'ระบบ',
                   lastModifiedByEmail: user?.email || '',
-                  lastModifiedAt: new Date()
+                  lastModifiedAt: serverTimestamp()
                 });
 
-                toast.success(`คืนเครดิต ฿${new Intl.NumberFormat('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(refundAmount)} ให้เว็บไซต์ ${transaction.websiteName} สำเร็จ`);
+                toast.success(`คืนเครดิต ฿${new Intl.NumberFormat('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(refundResult.refundAmount)} ให้เว็บไซต์ ${refundResult.websiteName} สำเร็จ`);
               } else {
                 console.error(`Website not found: ${transaction.websiteName} (ID: ${transaction.websiteId})`);
                 toast.error(`ไม่พบเว็บไซต์: ${transaction.websiteName}`);
@@ -1719,7 +1737,7 @@ export default function BotTransactionsPage() {
                         ) : (
                           'บันทึกการเปลี่ยนแปลง'
                         )}
-                      </button>
+                      </button> 
                     </div>
                   </>
                 )}
