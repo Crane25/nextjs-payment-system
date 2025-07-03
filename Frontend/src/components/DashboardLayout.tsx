@@ -6,7 +6,8 @@ import { useUserProfile } from '../contexts/UserContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { useRouter } from 'next/navigation';
 import Sidebar from './Sidebar';
-import { Bars3Icon, MoonIcon, SunIcon } from '@heroicons/react/24/outline';
+import { Bars3Icon, MoonIcon, SunIcon, ArrowRightOnRectangleIcon } from '@heroicons/react/24/outline';
+import toast from 'react-hot-toast';
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
@@ -20,7 +21,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({
   subtitle = 'ภาพรวมการเงินของคุณ'
 }) => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const { user, loading } = useAuth();
+  const { user, loading, logout } = useAuth();
   const { userProfile } = useUserProfile();
   const { isDarkMode, toggleTheme } = useTheme();
   const router = useRouter();
@@ -31,6 +32,16 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({
       router.push('/login');
     }
   }, [user, loading, router]);
+
+  // Handle logout
+  const handleLogout = async () => {
+    try {
+      await logout();
+      toast.success('ออกจากระบบสำเร็จ');
+    } catch (error) {
+      toast.error('เกิดข้อผิดพลาดในการออกจากระบบ');
+    }
+  };
 
   if (loading) {
     return (
@@ -113,6 +124,22 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({
                   <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-green-400 border-2 border-white dark:border-gray-800 rounded-full animate-pulse"></div>
                 </div>
               </div>
+              
+              {/* Logout Button */}
+              <button
+                onClick={handleLogout}
+                className="group relative p-2 rounded-xl hover:bg-white/60 dark:hover:bg-gray-700/60 transition-all duration-300 ring-1 ring-red-200/50 dark:ring-gray-600/50 hover:ring-red-400/60 dark:hover:ring-red-400/60 hover:shadow-lg transform hover:scale-110"
+                title="ออกจากระบบ"
+              >
+                {/* Background gradient */}
+                <div className="absolute inset-0 bg-gradient-to-r from-red-500/10 via-pink-500/10 to-red-500/10 dark:from-red-400/10 dark:via-pink-400/10 dark:to-red-400/10 rounded-xl opacity-0 group-hover:opacity-100 transition-all duration-300"></div>
+                
+                {/* Icon */}
+                <ArrowRightOnRectangleIcon className="relative h-6 w-6 text-red-600 dark:text-red-400 group-hover:text-red-500 dark:group-hover:text-red-300 group-hover:scale-110 transition-all duration-300" />
+                
+                {/* Subtle glow effect */}
+                <div className="absolute inset-0 rounded-xl bg-gradient-to-r from-red-400/20 via-pink-400/20 to-red-400/20 blur-sm opacity-0 group-hover:opacity-100 transition-all duration-300"></div>
+              </button>
             </div>
           </div>
         </div>

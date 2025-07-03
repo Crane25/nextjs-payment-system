@@ -9,7 +9,6 @@ import {
   HomeIcon,
   CogIcon,
   UserIcon,
-  ArrowRightOnRectangleIcon,
   Bars3Icon,
   XMarkIcon,
   CurrencyDollarIcon,
@@ -38,7 +37,7 @@ interface SidebarProps {
 }
 
 const Sidebar: React.FC<SidebarProps> = ({ isOpen, setIsOpen }) => {
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
   const { canViewTeams, canAccessAdminPanel, canViewWebsites, canViewTopup, isUser } = usePermission();
   const pathname = usePathname();
 
@@ -140,15 +139,6 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, setIsOpen }) => {
       current: pathname === '/settings'
     }
   ];
-
-  const handleLogout = async () => {
-    try {
-      await logout();
-      toast.success('ออกจากระบบสำเร็จ');
-    } catch (error) {
-      toast.error('เกิดข้อผิดพลาดในการออกจากระบบ');
-    }
-  };
 
   // Render navigation item
   const renderNavItem = (item: any, index: number) => {
@@ -282,19 +272,6 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, setIsOpen }) => {
           {/* Footer - Fixed at bottom */}
           <div className="relative border-t border-gray-200/50 dark:border-gray-600/40 flex-shrink-0 bg-gradient-to-r from-gray-50/80 via-blue-50/40 to-purple-50/80 dark:from-gray-800/60 dark:via-gray-700/40 dark:to-gray-800/60 backdrop-blur-sm overflow-hidden">
             <div className="absolute inset-0 bg-gradient-to-r from-blue-500/5 via-purple-500/5 to-pink-500/5 dark:from-blue-500/3 dark:via-purple-500/3 dark:to-pink-500/3"></div>
-            
-            {/* Logout Button */}
-            <div className="relative p-3 border-b border-gray-200/50 dark:border-gray-600/40">
-              <button
-                onClick={handleLogout}
-                className="group relative flex items-center w-full px-4 py-3 text-sm font-semibold text-red-600 dark:text-red-300 rounded-xl hover:text-white transition-all duration-300 border border-red-200/50 dark:border-red-400/20 hover:border-red-400 dark:hover:border-red-300 bg-gradient-to-r from-red-50 to-pink-50 hover:from-red-500 hover:to-pink-500 dark:from-red-900/20 dark:to-pink-900/20 dark:hover:from-red-500/80 dark:hover:to-pink-500/80 shadow-md hover:shadow-lg transform hover:scale-[1.02] overflow-hidden"
-              >
-                <div className="absolute inset-0 bg-gradient-to-r from-red-500 to-pink-500 opacity-0 group-hover:opacity-100 transition-all duration-300"></div>
-                <ArrowRightOnRectangleIcon className="relative mr-3 h-5 w-5 text-red-500 dark:text-red-300 group-hover:text-white transition-all duration-300 group-hover:rotate-12" />
-                <span className="relative font-bold">ออกจากระบบ</span>
-                <div className="relative ml-auto w-2 h-2 bg-red-400 dark:bg-red-300 rounded-full group-hover:bg-white animate-pulse"></div>
-              </button>
-            </div>
             
             <div className="relative p-3 text-center">
               <div className="flex items-center justify-center space-x-2 mb-1">
