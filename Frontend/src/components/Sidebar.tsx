@@ -62,9 +62,9 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, setIsOpen }) => {
       iconSolid: DocumentTextIconSolid,
       current: pathname === '/topup-history'
     }] : []),
-    // บอททำรายการ (บางส่วน) - สำหรับผู้ใช้ที่มีสิทธิ์ดู topup
+    // บอทกำลังทำรายการ - สำหรับผู้ใช้ที่มีสิทธิ์ดู topup
     ...(canViewTopup() ? [{
-      name: 'บอททำรายการ (บางส่วน)',
+      name: 'บอทกำลังทำรายการ',
       href: '/bot-transactions',
       icon: BoltIcon,
       iconSolid: BoltIcon,
@@ -72,7 +72,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, setIsOpen }) => {
     }] : []),
     // บอททำรายการ (ทั้งหมด) - สำหรับผู้ใช้ที่มีสิทธิ์ดู topup
     ...(canViewTopup() ? [{
-      name: 'บอททำรายการ (ทั้งหมด)',
+      name: 'ประวัติบอททำรายการ',
       href: '/all-transactions',
       icon: BoltIcon,
       iconSolid: BoltIcon,

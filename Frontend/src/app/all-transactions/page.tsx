@@ -6,7 +6,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useUserProfile } from '../../contexts/UserContext';
 import { usePermission } from '../../hooks/usePermission';
 import { useMultiTeam } from '../../hooks/useMultiTeam';
-import { collection, query, where, orderBy, getDocs, onSnapshot, updateDoc, doc, limit, startAfter, Query, QuerySnapshot, DocumentData, addDoc, getDoc, runTransaction, serverTimestamp } from 'firebase/firestore';
+import { collection, query, where, orderBy, getDocs, updateDoc, doc, limit, startAfter, Query, QuerySnapshot, DocumentData, addDoc, getDoc, runTransaction, serverTimestamp } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import DashboardLayout from '../../components/DashboardLayout';
 // Removed VirtualScrollTable import - now using regular HTML table
@@ -121,7 +121,7 @@ export default function BotTransactionsPage() {
   // Teams data loaded - removed debug logging
 
   const [transactions, setTransactions] = useState<BotTransaction[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false); // เปลี่ยนจาก true เป็น false
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [updatingStatus, setUpdatingStatus] = useState<string | null>(null);
@@ -130,8 +130,8 @@ export default function BotTransactionsPage() {
   const [selectedTeamFilter, setSelectedTeamFilter] = useState<'all' | string>('all');
   const [selectedDate, setSelectedDate] = useState<string>(getLocalDateString()); // YYYY-MM-DD format
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
-
-  // Modal states
+  const [showAllData, setShowAllData] = useState(true);
+  const [isDataLoaded, setIsDataLoaded] = useState(false); // เพิ่ม state เพื่อเช็คว่าข้อมูลถูกโหลดแล้วหรือไม่
   const [showManageModal, setShowManageModal] = useState(false);
   const [selectedTransaction, setSelectedTransaction] = useState<BotTransaction | null>(null);
   const [modalStatus, setModalStatus] = useState('');
@@ -145,9 +145,6 @@ export default function BotTransactionsPage() {
   const [hasMoreData, setHasMoreData] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   
-  // Always show all data
-  const showAllData = true;
-  
   // Progress tracking
   const [loadingProgress, setLoadingProgress] = useState({ current: 0, total: 0 });
   
@@ -160,6 +157,7 @@ export default function BotTransactionsPage() {
     totalQueryTime: number;
     cacheHits: number;
     cacheMisses: number;
+    loadEndTime?: number;
   }>({
     loadStartTime: 0,
     totalQueryTime: 0,
@@ -167,8 +165,8 @@ export default function BotTransactionsPage() {
     cacheMisses: 0
   });
 
-  // Real-time listener
-  const unsubscribeRef = useRef<(() => void) | null>(null);
+  // ลบ Real-time listener ref ที่ไม่ใช้แล้ว
+  // const unsubscribeRef = useRef<(() => void) | null>(null);
 
   // Optimized loading function with proper server-side pagination
   const loadTransactions = useCallback(async (forceRefresh = false) => {
@@ -203,6 +201,7 @@ export default function BotTransactionsPage() {
         setTransactions([]);
         setLoading(false);
         setRefreshing(false);
+        setIsDataLoaded(true); // เซ็ตว่าข้อมูลถูกโหลดแล้ว
         isLoadingRef.current = false;
         return;
       }
@@ -385,8 +384,19 @@ export default function BotTransactionsPage() {
       setHasMoreData(false);
 
       setLastUpdated(new Date());
-      performanceRef.current.cacheMisses++;
-
+      setIsDataLoaded(true); // เซ็ตว่าข้อมูลถูกโหลดแล้ว
+      
+      // Performance logging
+      performanceRef.current.loadEndTime = performance.now();
+      const totalTime = performanceRef.current.loadEndTime - performanceRef.current.loadStartTime;
+      
+      if (process.env.NODE_ENV === 'development') {
+        console.log('📊 Transaction Loading Stats:');
+        console.log(`⏱️  Total time: ${totalTime.toFixed(2)}ms`);
+        console.log(`🔥 Query time: ${performanceRef.current.totalQueryTime.toFixed(2)}ms`);
+        console.log(`📦 Final results: ${filteredRecords.length} bot transactions`);
+      }
+      
     } catch (err) {
       console.error('Error loading bot transactions:', err);
       setError('ไม่สามารถโหลดข้อมูลธุรกรรมได้');
@@ -396,188 +406,44 @@ export default function BotTransactionsPage() {
       setRefreshing(false);
       isLoadingRef.current = false;
     }
-  }, [user, userProfile, teams, teamsLoading, itemsPerPage, showAllData, selectedDate]);
+  }, [user, userProfile, teams, teamsLoading, selectedDate, showAllData]);
 
   // Removed loadMoreTransactions - now using pagination
 
-  // Initial load and team changes
-  useEffect(() => {
-    if (!teamsLoading && user && userProfile && teams.length > 0) {
-      loadTransactions(true);
-    }
-  }, [loadTransactions, teamsLoading, user, userProfile, teams]);
+  // Initial load and team changes - comment out to disable auto-loading
+  // useEffect(() => {
+  //   if (!teamsLoading && user && userProfile && teams.length > 0) {
+  //     loadTransactions(true);
+  //   }
+  // }, [loadTransactions, teamsLoading, user, userProfile, teams]);
 
-  // Optimized real-time listener for new bot transactions
-  useEffect(() => {
-    if (!user || !userProfile || teamsLoading) return;
+  // ลบ Real-time listener ออกทั้งหมด
+  // useEffect(() => {
+  //   // Real-time listener for new bot transactions
+  //   if (!user || !userProfile || teamsLoading || !isDataLoaded) return;
+  //   ...
+  // }, [user, userProfile, teamsLoading, teams, loadTransactions, selectedDate, isDataLoaded]);
 
-    let unsubscribe: (() => void) | null = null;
-    let isInitialLoad = true;
-
-    // Set up real-time listener for transactions collection
-    unsubscribe = onSnapshot(
-      collection(db, 'transactions'), 
-      (snapshot) => {
-        // Skip initial load to avoid duplicate data
-        if (isInitialLoad) {
-          isInitialLoad = false;
-          return;
-        }
-
-        // Check for new records only
-        const newRecords = snapshot.docChanges().filter(change => change.type === 'added');
-        
-        if (newRecords.length > 0) {
-          // Check if any new records are bot transactions relevant to current user and from selected date
-          const userTeamIds = teams.map(team => team.id);
-          
-          // Get selected date range (00:00:00 to 23:59:59)
-          const selectedDateObj = new Date(selectedDate);
-          const startOfSelectedDate = new Date(selectedDateObj.getFullYear(), selectedDateObj.getMonth(), selectedDateObj.getDate(), 0, 0, 0);
-          const endOfSelectedDate = new Date(selectedDateObj.getFullYear(), selectedDateObj.getMonth(), selectedDateObj.getDate(), 23, 59, 59);
-          
-          const relevantNewRecords = newRecords.filter(change => {
-            const data = change.doc.data();
-            
-            // Check if it's a bot transaction (withdraw + api)
-            if (data.type !== 'withdraw' || data.createdBy !== 'api') {
-              return false;
-            }
-            
-            // Check if record is from selected date only
-            const recordTime = data.createdAt?.toDate?.() || new Date(data.createdAt);
-            if (recordTime < startOfSelectedDate || recordTime > endOfSelectedDate) {
-              return false;
-            }
-            
-            // Check if it belongs to user's teams
-            return data.teamId && userTeamIds.includes(data.teamId);
-          });
-
-          if (relevantNewRecords.length > 0) {
-            // Process new records and add them to the list
-            const newTransactions = relevantNewRecords.map(change => {
-              const data = change.doc.data();
-              const team = teams.find(t => t.id === data.teamId);
-              const teamName = team?.name || `ทีม ${data.teamId?.substring(0, 8) || 'ไม่ระบุ'}`;
-              
-              return {
-                id: change.doc.id,
-                ...data,
-                teamName
-              } as BotTransaction;
-            });
-            
-            // Add new transactions to the beginning of the list (since they're newer)
-            setTransactions(prev => {
-              // Check for duplicates before adding
-              const newUniqueTransactions = newTransactions.filter(newTx => 
-                !prev.some(existingTx => existingTx.id === newTx.id)
-              );
-              
-              if (newUniqueTransactions.length > 0) {
-                // Sort by creation time (newest first) and merge
-                const combined = [...newUniqueTransactions, ...prev];
-                return combined.sort((a, b) => {
-                  const aTime = a.createdAt?.toDate?.() || new Date(a.createdAt);
-                  const bTime = b.createdAt?.toDate?.() || new Date(b.createdAt);
-                  return bTime.getTime() - aTime.getTime();
-                });
-              }
-              
-              return prev;
-            });
-            
-            // Update last updated time
-            setLastUpdated(new Date());
-            
-            // Show notification
-            const isToday = selectedDate === getLocalDateString();
-            toast.success(
-              `มีธุรกรรม Bot ใหม่${isToday ? 'วันนี้' : 'ในวันที่เลือก'} ${relevantNewRecords.length} รายการ`,
-              {
-                duration: 4000,
-                position: 'top-right',
-              }
-            );
-          }
-        }
-
-        // Check for modified records (status changes)
-        const modifiedRecords = snapshot.docChanges().filter(change => change.type === 'modified');
-        
-        if (modifiedRecords.length > 0) {
-          const userTeamIds = teams.map(team => team.id);
-          
-          const relevantModifiedRecords = modifiedRecords.filter(change => {
-            const data = change.doc.data();
-            
-            // Check if it's a bot transaction and belongs to user's teams
-            return data.type === 'withdraw' && 
-                   data.createdBy === 'api' && 
-                   data.teamId && 
-                   userTeamIds.includes(data.teamId);
-          });
-          
-          if (relevantModifiedRecords.length > 0) {
-            // Update existing transactions in real-time
-            setTransactions(prev => {
-              const updated = [...prev];
-              relevantModifiedRecords.forEach(change => {
-                const data = change.doc.data();
-                const index = updated.findIndex(t => t.id === change.doc.id);
-                if (index !== -1) {
-                  const team = teams.find(t => t.id === data.teamId);
-                  const teamName = team?.name || `ทีม ${data.teamId?.substring(0, 8) || 'ไม่ระบุ'}`;
-                  
-                  updated[index] = {
-                    id: change.doc.id,
-                    ...data,
-                    teamName
-                  } as BotTransaction;
-                }
-              });
-              return updated;
-            });
-            
-            // Update last updated time
-            setLastUpdated(new Date());
-          }
-        }
-      },
-      (error) => {
-        // Real-time listener error - log only in development
-        if (process.env.NODE_ENV === 'development') {
-          console.error('Real-time listener error:', error);
-        }
-      }
-    );
-
-    // Store unsubscribe function
-    unsubscribeRef.current = unsubscribe;
-
-    return () => {
-      if (unsubscribe) {
-        unsubscribe();
-      }
-    };
-  }, [user, userProfile, teamsLoading, teams, loadTransactions, selectedDate]);
-
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      if (unsubscribeRef.current) {
-        unsubscribeRef.current();
-      }
-    };
-  }, []);
+  // ลบ cleanup useEffect ที่เกี่ยวข้อง
+  // useEffect(() => {
+  //   return () => {
+  //     if (unsubscribeRef.current) {
+  //       unsubscribeRef.current();
+  //     }
+  //   };
+  // }, []);
 
   // Reset page when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, statusFilter, selectedTeamFilter, itemsPerPage, selectedDate]);
+  }, [searchTerm, statusFilter, selectedTeamFilter]);
 
   const handleRefresh = () => {
+    loadTransactions(true);
+  };
+
+  // เพิ่มฟังก์ชันสำหรับการค้นหา
+  const handleSearch = () => {
     loadTransactions(true);
   };
 
@@ -952,16 +818,17 @@ export default function BotTransactionsPage() {
 
   const filteredTransactions = getFilteredTransactions();
 
-  // Reset pagination when filters change
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [searchTerm, statusFilter, selectedTeamFilter]);
-
   if (teamsLoading) {
     return (
       <DashboardLayout title="ธุรกรรม Bot API" subtitle="กำลังโหลด...">
-        <div className="flex justify-center items-center h-64">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+        <div className="flex justify-center items-center h-64 animate-fade-in">
+          <div className="text-center">
+            <div className="relative mb-4">
+              <div className="animate-spin rounded-full h-12 w-12 border-4 border-blue-200 border-t-blue-600 dark:border-gray-600 dark:border-t-blue-400 mx-auto"></div>
+              <div className="absolute inset-0 rounded-full border-4 border-blue-400 opacity-20 animate-ping"></div>
+            </div>
+            <p className="text-gray-500 dark:text-gray-400 animate-fade-in-delay">กำลังโหลดข้อมูลทีม...</p>
+          </div>
         </div>
       </DashboardLayout>
     );
@@ -970,8 +837,13 @@ export default function BotTransactionsPage() {
   if (!user) {
     return (
       <DashboardLayout title="ธุรกรรม Bot API" subtitle="กรุณาเข้าสู่ระบบ">
-        <div className="text-center text-red-600">
-          กรุณาเข้าสู่ระบบเพื่อใช้งาน
+        <div className="text-center text-red-600 animate-fade-in">
+          <div className="py-16">
+            <svg className="h-12 w-12 mx-auto mb-4 opacity-50 animate-bounce" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+            </svg>
+            <p className="text-lg font-semibold animate-fade-in-delay">กรุณาเข้าสู่ระบบเพื่อใช้งาน</p>
+          </div>
         </div>
       </DashboardLayout>
     );
@@ -980,8 +852,14 @@ export default function BotTransactionsPage() {
   if (teams.length === 0 && !teamsLoading) {
     return (
       <DashboardLayout title="ธุรกรรม Bot API" subtitle="ไม่พบทีม">
-        <div className="text-center text-gray-500">
-          ไม่พบทีมที่เข้าร่วม
+        <div className="text-center text-gray-500 animate-fade-in">
+          <div className="py-16">
+            <svg className="h-12 w-12 mx-auto mb-4 opacity-50 animate-bounce" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 715.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+            </svg>
+            <p className="text-lg font-semibold animate-fade-in-delay">ไม่พบทีมที่เข้าร่วม</p>
+            <p className="text-sm animate-fade-in-delay-2">คุณยังไม่ได้เป็นสมาชิกของทีมใดๆ</p>
+          </div>
         </div>
       </DashboardLayout>
     );
@@ -1241,32 +1119,109 @@ export default function BotTransactionsPage() {
                   ล้างตัวกรอง
                 </button>
               )}
+
+              {/* เพิ่มปุ่มค้นหา */}
+              <button
+                onClick={handleSearch}
+                disabled={loading || refreshing}
+                className="flex items-center gap-2 px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <svg className={`w-4 h-4 ${loading || refreshing ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  {loading || refreshing ? (
+                    <circle cx="12" cy="12" r="10" strokeWidth={2} className="opacity-25" />
+                  ) : null}
+                  {loading || refreshing ? (
+                    <path d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" strokeWidth={2} />
+                  ) : (
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                  )}
+                </svg>
+                <span className={loading || refreshing ? 'animate-pulse' : ''}>
+                  {loading || refreshing ? 'กำลังค้นหา...' : 'ค้นหา'}
+                </span>
+              </button>
             </div>
           </div>
         </div>
 
         {/* Main Content */}
         <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-sm rounded-2xl shadow-lg border border-white/30 dark:border-gray-700/30 p-6">
-          {loading ? (
-            <div className="flex flex-col items-center justify-center py-16">
-              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mb-4"></div>
-              <p className="text-gray-500 dark:text-gray-400">กำลังโหลดข้อมูลธุรกรรม...</p>
+          {loading || refreshing ? (
+            <div className="flex flex-col items-center justify-center py-16 animate-fade-in">
+              <div className="relative mb-6">
+                {/* นาฬิกาทรายหมุน */}
+                <div className="animate-spin text-6xl text-blue-600 dark:text-blue-400">
+                  ⏳
+                </div>
+                {/* เพิ่ม pulse effect รอบ */}
+                <div className="absolute inset-0 rounded-full border-4 border-blue-400 opacity-20 animate-ping"></div>
+                <div className="absolute inset-2 rounded-full border-2 border-blue-500 opacity-10 animate-ping" style={{ animationDelay: '0.5s' }}></div>
+              </div>
+              <p className="text-gray-500 dark:text-gray-400 text-lg font-medium animate-fade-in-delay">
+                กำลังโหลดข้อมูลธุรกรรม...
+              </p>
+              {/* เพิ่มข้อความเพิ่มเติมเมื่อมี progress */}
+              {loadingProgress.total > 0 && (
+                <div className="mt-4 text-center animate-fade-in-delay-2">
+                  <div className="text-sm text-gray-400 dark:text-gray-500 mb-2">
+                    โหลดทีม {loadingProgress.current + 1} จาก {loadingProgress.total} ทีม
+                  </div>
+                  {/* Progress bar */}
+                  <div className="w-64 bg-gray-200 dark:bg-gray-700 rounded-full h-2 mx-auto">
+                    <div 
+                      className="bg-blue-600 h-2 rounded-full transition-all duration-300 ease-out"
+                      style={{ width: `${((loadingProgress.current + 1) / loadingProgress.total) * 100}%` }}
+                    ></div>
+                  </div>
+                </div>
+              )}
+              {transactions.length > 0 && (
+                <div className="mt-3 text-sm text-blue-600 dark:text-blue-400 animate-pulse">
+                  พบข้อมูลแล้ว {transactions.length} รายการ
+                </div>
+              )}
             </div>
           ) : error ? (
-            <div className="text-center py-16">
+            <div className="text-center py-16 animate-fade-in">
               <div className="text-red-500 mb-4">
-                <svg className="h-12 w-12 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="h-12 w-12 mx-auto mb-2 animate-bounce" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
-                <p className="text-lg font-semibold">เกิดข้อผิดพลาด</p>
-                <p className="text-sm">{error}</p>
+                <p className="text-lg font-semibold animate-fade-in-delay">เกิดข้อผิดพลาด</p>
+                <p className="text-sm animate-fade-in-delay-2">{error}</p>
               </div>
               <button
                 onClick={() => loadTransactions(true)}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors animate-fade-in-delay-2"
               >
                 ลองใหม่
               </button>
+            </div>
+          ) : !isDataLoaded ? (
+            // แสดงข้อความเมื่อยังไม่ได้ค้นหาข้อมูล พร้อมอนิเมชั่น
+            <div className="text-center py-16 animate-fade-in">
+              <div className="text-gray-500 dark:text-gray-400">
+                <div className="relative inline-block mb-6">
+                  <svg className="h-16 w-16 mx-auto opacity-50 animate-search-icon-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                  </svg>
+                  {/* เพิ่ม ripple effect */}
+                  <div className="absolute inset-0 rounded-full animate-ping bg-blue-400 opacity-20"></div>
+                  <div className="absolute inset-2 rounded-full animate-ping bg-blue-500 opacity-10" style={{ animationDelay: '0.5s' }}></div>
+                </div>
+                <p className="text-xl font-semibold mb-3 animate-fade-in-delay text-gray-700 dark:text-gray-300">
+                  ยังไม่มีข้อมูลที่แสดง
+                </p>
+                <p className="text-sm mb-6 animate-fade-in-delay text-gray-600 dark:text-gray-400 max-w-md mx-auto leading-relaxed">
+                  กรุณาตั้งค่าตัวกรองข้อมูล และกดปุ่ม <span className="font-medium text-blue-600 dark:text-blue-400">"ค้นหา"</span> เพื่อโหลดข้อมูลธุรกรรม
+                </p>
+                <div className="flex items-center justify-center gap-2 text-sm text-blue-600 dark:text-blue-400 animate-fade-in-delay-2 bg-blue-50 dark:bg-blue-900/20 px-4 py-2 rounded-full max-w-sm mx-auto">
+                  <svg className="w-4 h-4 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <span>ใช้ตัวกรองเพื่อจำกัดผลการค้นหา</span>
+                </div>
+              </div>
             </div>
           ) : (
             <>
@@ -1290,10 +1245,11 @@ export default function BotTransactionsPage() {
                       <p className="text-sm text-gray-600 dark:text-gray-400">
                         รายการธุรกรรมการถอนเงินที่สร้างผ่าน API ในวันที่เลือกเท่านั้น
                       </p>
-                      <div className="flex items-center gap-1">
+                      {/* ลบข้อความ Real-time */}
+                      {/* <div className="flex items-center gap-1">
                         <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
                         <span className="text-xs text-green-600 dark:text-green-400">อัพเดทแบบ Real-time</span>
-                      </div>
+                      </div> */}
                     </div>
                   </div>
                 </div>
@@ -1318,9 +1274,18 @@ export default function BotTransactionsPage() {
                     className="flex items-center gap-2 px-4 py-2 text-sm bg-blue-50 hover:bg-blue-100 dark:bg-blue-900/20 dark:hover:bg-blue-900/40 text-blue-600 dark:text-blue-400 rounded-lg transition-colors disabled:opacity-50"
                   >
                     <svg className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                      {refreshing ? (
+                        <>
+                          <circle cx="12" cy="12" r="10" strokeWidth={2} className="opacity-25" />
+                          <path d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" strokeWidth={2} />
+                        </>
+                      ) : (
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                      )}
                     </svg>
-                    รีเฟรช
+                    <span className={refreshing ? 'animate-pulse' : ''}>
+                      {refreshing ? 'กำลังรีเฟรช...' : 'รีเฟรช'}
+                    </span>
                   </button>
                 </div>
               </div>
@@ -1343,21 +1308,25 @@ export default function BotTransactionsPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {loading && transactions.length === 0 ? (
+                    {(loading || refreshing) && transactions.length === 0 ? (
                       <tr>
                         <td colSpan={10} className="py-16 text-center">
-                          <div className="flex flex-col items-center justify-center">
-                            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mb-2"></div>
-                            <span className="text-gray-500 dark:text-gray-400 text-center">
+                          <div className="flex flex-col items-center justify-center animate-fade-in">
+                            <div className="relative mb-4">
+                              <div className="animate-spin rounded-full h-12 w-12 border-4 border-blue-200 border-t-blue-600 dark:border-gray-600 dark:border-t-blue-400"></div>
+                              {/* เพิ่ม pulse effect รอบ spinner */}
+                              <div className="absolute inset-0 rounded-full border-2 border-blue-400 opacity-20 animate-ping"></div>
+                            </div>
+                            <span className="text-gray-500 dark:text-gray-400 text-center font-medium animate-fade-in-delay">
                               กำลังโหลดข้อมูลธุรกรรม...
                             </span>
                             {loadingProgress.total > 0 && (
-                              <div className="mt-2 text-xs text-gray-400">
+                              <div className="mt-3 text-xs text-gray-400 animate-fade-in-delay-2">
                                 โหลดทีม {loadingProgress.current + 1} จาก {loadingProgress.total} ทีม
                               </div>
                             )}
                             {transactions.length > 0 && (
-                              <div className="mt-1 text-xs text-blue-600 dark:text-blue-400">
+                              <div className="mt-2 text-xs text-blue-600 dark:text-blue-400 animate-pulse">
                                 พบข้อมูลแล้ว {transactions.length} รายการ
                               </div>
                             )}
@@ -1367,24 +1336,24 @@ export default function BotTransactionsPage() {
                     ) : teams.length === 0 && !teamsLoading ? (
                       <tr>
                         <td colSpan={10} className="py-16 text-center">
-                          <div className="text-gray-500 dark:text-gray-400">
-                            <svg className="h-12 w-12 mx-auto mb-2 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <div className="text-gray-500 dark:text-gray-400 animate-fade-in">
+                            <svg className="h-12 w-12 mx-auto mb-2 opacity-50 animate-bounce" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 715.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
                             </svg>
-                            <p>ไม่พบทีมที่เข้าร่วม</p>
-                            <p className="text-sm">คุณยังไม่ได้เป็นสมาชิกของทีมใดๆ</p>
+                            <p className="animate-fade-in-delay">ไม่พบทีมที่เข้าร่วม</p>
+                            <p className="text-sm animate-fade-in-delay-2">คุณยังไม่ได้เป็นสมาชิกของทีมใดๆ</p>
                           </div>
                         </td>
                       </tr>
                     ) : filteredTransactions.length === 0 ? (
                       <tr>
                         <td colSpan={10} className="py-16 text-center">
-                          <div className="text-gray-500 dark:text-gray-400">
-                            <svg className="h-12 w-12 mx-auto mb-2 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <div className="text-gray-500 dark:text-gray-400 animate-fade-in">
+                            <svg className="h-12 w-12 mx-auto mb-2 opacity-50 animate-bounce" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
                             </svg>
-                            <p>ไม่พบธุรกรรม Bot API ในวันที่เลือก</p>
-                            <p className="text-sm">ไม่มีการสร้างธุรกรรมผ่าน API ในวันที่เลือก</p>
+                            <p className="animate-fade-in-delay">ไม่พบธุรกรรม Bot API ในวันที่เลือก</p>
+                            <p className="text-sm animate-fade-in-delay-2">ไม่มีการสร้างธุรกรรมผ่าน API ในวันที่เลือก</p>
                           </div>
                         </td>
                       </tr>
@@ -1508,10 +1477,19 @@ export default function BotTransactionsPage() {
                                 disabled={updatingStatus === transaction.id}
                                 className="inline-flex items-center px-3 py-1.5 text-xs font-medium text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/40 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                               >
-                                <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                                </svg>
-                                จัดการ
+                                {updatingStatus === transaction.id ? (
+                                  <>
+                                    <div className="animate-spin rounded-full h-3 w-3 border-2 border-blue-600 border-t-transparent mr-1"></div>
+                                    <span className="animate-pulse">อัพเดท...</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                    </svg>
+                                    จัดการ
+                                  </>
+                                )}
                               </button>
                             )}
                           </td>
@@ -1523,7 +1501,7 @@ export default function BotTransactionsPage() {
               </div>
 
               {/* Load More Button */}
-              {hasMoreData && !loading && transactions.length > 0 && !showAllData && (
+              {hasMoreData && !(loading || refreshing) && transactions.length > 0 && !showAllData && (
                 <div className="mt-6 text-center">
                   <button
                     onClick={loadMoreData}
@@ -1532,8 +1510,8 @@ export default function BotTransactionsPage() {
                   >
                     {loadingMore ? (
                       <>
-                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
-                        กำลังโหลดข้อมูลเพิ่มเติม...
+                        <div className="animate-spin rounded-full h-4 w-4 border-2 border-blue-600 border-t-transparent"></div>
+                        <span className="animate-pulse">กำลังโหลดข้อมูลเพิ่มเติม...</span>
                       </>
                     ) : (
                       <>
@@ -1557,11 +1535,6 @@ export default function BotTransactionsPage() {
                 <div className="mt-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                   <div className="text-sm text-gray-700 dark:text-gray-300">
                     <div className="flex items-center gap-2">
-                      <div className="flex items-center gap-1">
-                        <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                        <span className="text-green-600 dark:text-green-400 font-medium">ข้อมูลทั้งหมด</span>
-                      </div>
-                      <span>-</span>
                       <span>แสดง {((currentPage - 1) * itemsPerPage) + 1} ถึง {Math.min(currentPage * itemsPerPage, filteredTransactions.length)} จาก {filteredTransactions.length} รายการ</span>
                     </div>
                   </div>
@@ -1621,17 +1594,17 @@ export default function BotTransactionsPage() {
 
         {/* Manage Transaction Modal */}
         <PortalModal isOpen={showManageModal && !!selectedTransaction}>
-          <div className="fixed inset-0 bg-black/70 backdrop-blur-xl flex items-center justify-center p-4 z-[100]">
-            <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl border border-white/20 dark:border-gray-700/50 max-w-md w-full max-h-[90vh] overflow-y-auto">
+          <div className="fixed inset-0 bg-black/70 backdrop-blur-xl flex items-center justify-center p-4 z-[100] animate-fade-in">
+            <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl border border-white/20 dark:border-gray-700/50 max-w-md w-full max-h-[90vh] overflow-y-auto transform transition-all duration-300 scale-95 animate-fade-in" style={{ animationDelay: '0.1s', transform: 'scale(1)' }}>
               <div className="p-6">
                 {/* Modal Header */}
-                <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center justify-between mb-6 animate-fade-in-delay">
                   <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
                     จัดการธุรกรรม
                   </h3>
                   <button
                     onClick={closeManageModal}
-                    className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                    className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors hover:scale-110 transform duration-200"
                   >
                     <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -1731,8 +1704,8 @@ export default function BotTransactionsPage() {
                       >
                         {updatingStatus === selectedTransaction.id ? (
                           <div className="flex items-center justify-center">
-                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                            กำลังบันทึก...
+                            <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent mr-2"></div>
+                            <span className="animate-pulse">กำลังบันทึก...</span>
                           </div>
                         ) : (
                           'บันทึกการเปลี่ยนแปลง'

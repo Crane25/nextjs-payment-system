@@ -29,6 +29,7 @@ import {
   logWebsiteStatusChanged, 
   logWebsiteTopup 
 } from '../../utils/logger';
+import { dashboardDataManager } from '@/utils/dashboardDataManager';
 
 // Portal Modal Component
 const PortalModal = ({ children, isOpen }: { children: React.ReactNode; isOpen: boolean }) => {
@@ -182,104 +183,42 @@ export default function Dashboard() {
     }
   };
 
-  // Optimized website loading with caching
-  const loadWebsitesOptimized = useCallback(async (forceRefresh = false) => {
-    if (!user) return;
-    
-    // Check cache first
-    if (!forceRefresh && websitesCache && Date.now() - websitesCache.timestamp < WEBSITES_CACHE_DURATION) {
-      setWebsites(websitesCache.websites);
-      setStats(websitesCache.stats);
-      setLoading(false);
-      return;
-    }
+  // ===== ปรับปรุง Data Loading โดยใช้ DashboardDataManager =====
+  
+  // แทนที่ loadWebsitesOptimized, loadTodayTopupAmount, loadTodayWithdrawAmount
+  const loadDashboardData = useCallback(async (forceRefresh = false) => {
+    if (!user || !userProfile) return;
     
     try {
-      if (forceRefresh) {
-        setRefreshing(true);
+      if (forceRefresh || !refreshing) {
+        setLoading(true);
       } else {
         setLoading(true);
       }
       
-      let websiteData: any[] = [];
+      // Get user team IDs
+      const userTeamIds = teams.map(team => team.id);
       
-      // โหลดข้อมูลจากทั้งสองที่: main websites collection และ user subcollection
-      let mainWebsites: any[] = [];
-      let userSubcollectionWebsites: any[] = [];
+      // Load all dashboard data in one consolidated call
+      const dashboardData = await dashboardDataManager.loadDashboardData(
+        user.uid,
+        userTeamIds,
+        userProfile.role || 'user',
+        forceRefresh
+      );
       
-      try {
-        // 1. โหลดจาก main websites collection
-        const websitesRef = collection(db, 'websites');
-        const querySnapshot = await getDocs(websitesRef);
-        
-        const allWebsites = querySnapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        }));
-        
-        // กรองเว็บไซต์ที่เป็นของ user
-        mainWebsites = allWebsites.filter((website: any) => {
-          // ตรวจสอบว่าเว็บไซต์เป็นของผู้ใช้โดยตรง
-          if (website.userId === user.uid) return true;
-          
-          // ถ้าเป็น admin สามารถเห็นทุกเว็บไซต์
-          if (userProfile?.role === 'admin') return true;
-          
-          // ถ้ามีทีม ตรวจสอบว่าผู้ใช้เป็นสมาชิกของทีมนั้นหรือไม่
-          if (website.teamId) {
-            // ตรวจสอบจาก teams ที่โหลดมาแล้ว
-            const userTeamIds = teams.map(team => team.id);
-            if (userTeamIds.includes(website.teamId)) {
-              return true;
-            }
-            
-            // ตรวจสอบจาก userProfile.teamId
-            if (userProfile?.teamId === website.teamId) {
-              return true;
-            }
-          }
-          
-          return false;
-        });
-        
-      } catch (error) {
-        // Error loading from main collection - continue with other sources
-      }
+      // Update all state variables from the consolidated data
+      setWebsites(dashboardData.websites);
+      setTodayTopupAmount(dashboardData.stats.todayTopup);
+      setTodayWithdrawAmount(dashboardData.stats.todayWithdraw);
+      setTodayTopupByWebsite(dashboardData.stats.todayTopupByWebsite);
+      setTodayWithdrawByWebsite(dashboardData.stats.todayWithdrawByWebsite);
       
-      try {
-        // 2. โหลดจาก user subcollection (backward compatibility)
-        const userWebsitesRef = collection(db, 'users', user.uid, 'websites');
-        const userQuerySnapshot = await getDocs(userWebsitesRef);
-        
-        userSubcollectionWebsites = userQuerySnapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data(),
-          isUserSubcollection: true // ทำเครื่องหมายว่ามาจาก user subcollection
-        }));
-        
-      } catch (error) {
-        // Error loading from user subcollection - continue with other sources
-      }
-      
-      // รวมข้อมูลจากทั้งสองที่ (หลีกเลี่ยงการซ้ำ)
-      const combinedWebsites = [...mainWebsites];
-      userSubcollectionWebsites.forEach(userWebsite => {
-        // ตรวจสอบว่าเว็บไซต์นี้ยังไม่มีใน main collection
-        const existsInMain = mainWebsites.some(mainWebsite => 
-          mainWebsite.name === userWebsite.name && mainWebsite.url === userWebsite.url
-        );
-        if (!existsInMain) {
-          combinedWebsites.push(userWebsite);
-        }
-      });
-      
-      websiteData = combinedWebsites;
-      
-      setWebsites(websiteData);
-      
-      // Calculate stats using websiteData
-      const totalBalance = websiteData.reduce((sum, site: any) => sum + (site.balance || 0), 0);
-      const totalDailyTopup = websiteData.reduce((sum, site: any) => sum + (site.dailyTopup || 0), 0);
+      // Calculate stats using consolidated data
+      const totalBalance = dashboardData.stats.totalBalance;
+      const totalDailyTopup = dashboardData.websites.reduce(
+        (sum, site: any) => sum + (site.dailyTopup || 0), 0
+      );
       
       const calculatedStats = {
         totalBalance,
@@ -291,131 +230,50 @@ export default function Dashboard() {
       setStats(calculatedStats);
       setLastUpdated(new Date());
       
-      // Update cache
-      websitesCache = {
-        websites: websiteData,
-        stats: calculatedStats,
-        timestamp: Date.now()
-      };
-      
     } catch (error: any) {
-      // Error loading websites - show user-friendly message
+      console.error('Error loading dashboard data:', error);
+      
+      // Show user-friendly error messages
       if (error.code === 'permission-denied') {
-        toast.error('ไม่มีสิทธิ์เข้าถึงข้อมูลเว็บไซต์');
+        toast.error('ไม่มีสิทธิ์เข้าถึงข้อมูล');
       } else if (error.code === 'unavailable') {
         toast.error('บริการไม่พร้อมใช้งาน กรุณาลองใหม่อีกครั้ง');
       } else {
-        toast.error('ไม่สามารถโหลดข้อมูลเว็บไซต์ได้ กรุณาลองใหม่อีกครั้ง');
+        toast.error('ไม่สามารถโหลดข้อมูลได้ กรุณาลองใหม่อีกครั้ง');
       }
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [user?.uid, teams.length, userProfile?.role, userProfile?.teamId]);
+  }, [user?.uid, teams, userProfile?.role, refreshing]);
 
-  // Load today's topup amount from topupHistory
-  const loadTodayTopupAmount = useCallback(async () => {
-    if (!user || !userProfile) return;
+  // Force refresh function - แทนที่ handleRefreshWebsites
+  const handleRefreshDashboard = useCallback(async () => {
+    setRefreshing(true);
+    
+    // Clear cache และ refresh permissions
+    dashboardDataManager.clearUserCache(user?.uid || '');
+    await refreshPermissions();
+    
+    // Reload data
+    await loadDashboardData(true);
+    
+    toast.success('ข้อมูลถูกอัปเดตแล้ว', {
+      duration: 2000,
+      position: 'top-right',
+    });
+  }, [user?.uid, loadDashboardData, refreshPermissions]);
 
-    try {
-      const topupHistoryRef = collection(db, 'topupHistory');
-      const topupSnapshot = await getDocs(topupHistoryRef);
-      
-      const userTeamIds = teams.map(team => team.id);
-      const today = new Date();
-      
-      let todayAmount = 0;
-      const websiteTopupMap: Record<string, number> = {};
-      
-      topupSnapshot.docs.forEach(doc => {
-        const data = doc.data();
-        const recordDate = new Date(data.timestamp);
-        
-        // Check if record is from today
-        if (recordDate.toDateString() === today.toDateString()) {
-          // Check if user has permission to see this record
-          if (userProfile.role === 'admin' || 
-              (data.teamId && userTeamIds.includes(data.teamId))) {
-            const amount = data.amount || 0;
-            const websiteId = data.websiteId;
-            
-            todayAmount += amount;
-            
-            // Track per website
-            if (websiteId) {
-              websiteTopupMap[websiteId] = (websiteTopupMap[websiteId] || 0) + amount;
-            }
-          }
-        }
-      });
-      
-      setTodayTopupAmount(todayAmount);
-      setTodayTopupByWebsite(websiteTopupMap);
-    } catch (error) {
-      // Error loading today topup amount - fail silently
-    }
-  }, [user, userProfile, teams]);
-
-  // Load today's withdraw amount from withdrawHistory
-  const loadTodayWithdrawAmount = useCallback(async () => {
-    if (!user || !userProfile) return;
-
-    try {
-      const withdrawHistoryRef = collection(db, 'withdrawHistory');
-      const withdrawSnapshot = await getDocs(withdrawHistoryRef);
-      
-      const userTeamIds = teams.map(team => team.id);
-      const today = new Date();
-      
-      let todayAmount = 0;
-      const websiteWithdrawMap: Record<string, number> = {};
-      
-      withdrawSnapshot.docs.forEach(doc => {
-        const data = doc.data();
-        const recordDate = new Date(data.timestamp);
-        
-        // Check if record is from today
-        if (recordDate.toDateString() === today.toDateString()) {
-          // Check if user has permission to see this record
-          if (userProfile.role === 'admin' || 
-              (data.teamId && userTeamIds.includes(data.teamId))) {
-            const amount = data.amount || 0;
-            const websiteId = data.websiteId;
-            
-            todayAmount += amount;
-            
-            // Track per website
-            if (websiteId) {
-              websiteWithdrawMap[websiteId] = (websiteWithdrawMap[websiteId] || 0) + amount;
-            }
-          }
-        }
-      });
-      
-      setTodayWithdrawAmount(todayAmount);
-      setTodayWithdrawByWebsite(websiteWithdrawMap);
-    } catch (error) {
-      // Error loading today withdraw amount - fail silently
-    }
-  }, [user, userProfile, teams]);
-
-  // Force refresh function
-  const handleRefreshWebsites = useCallback(async () => {
-    websitesCache = null; // Clear cache
-    await refreshPermissions(); // Refresh permissions first
-    loadWebsitesOptimized(true);
-    loadTodayTopupAmount(); // Also refresh today's topup amount
-    loadTodayWithdrawAmount(); // Also refresh today's withdraw amount
-  }, [loadWebsitesOptimized, loadTodayTopupAmount, loadTodayWithdrawAmount, refreshPermissions]);
-
+  // ===== ปรับปรุง useEffect หลัก =====
+  
   useEffect(() => {
-    if (user && teams.length >= 0) { // รอให้ teams โหลดเสร็จ (อาจจะ 0 หรือมากกว่า)
-      loadWebsitesOptimized();
-      loadTodayTopupAmount();
-      loadTodayWithdrawAmount();
+    if (user && teams.length >= 0) {
+      loadDashboardData();
     }
-  }, [user?.uid, teams.length, loadWebsitesOptimized, loadTodayTopupAmount, loadTodayWithdrawAmount]); // ใช้ user.uid และ teams.length แทน
+  }, [user?.uid, teams.length, loadDashboardData]);
 
+  // ===== ปรับปรุง Real-time Listeners =====
+  
   // Real-time listener for websites changes
   useEffect(() => {
     if (!user || !userProfile) return;
@@ -456,34 +314,12 @@ export default function Dashboard() {
           });
 
           if (relevantChanges.length > 0) {
-            // Update data directly without full reload
-            setWebsites(prev => {
-              let updated = [...prev];
-              
-              relevantChanges.forEach(change => {
-                const data = { id: change.doc.id, ...change.doc.data() };
-                
-                if (change.type === 'added') {
-                  // Add new website if not already exists
-                  if (!updated.find(w => w.id === data.id)) {
-                    updated.push(data);
-                  }
-                } else if (change.type === 'modified') {
-                  // Update existing website
-                  const index = updated.findIndex(w => w.id === data.id);
-                  if (index !== -1) {
-                    updated[index] = data;
-                  }
-                } else if (change.type === 'removed') {
-                  // Remove website
-                  updated = updated.filter(w => w.id !== data.id);
-                }
-              });
-              
-              return updated;
-            });
+            // Clear cache and reload data for real-time updates
+            dashboardDataManager.clearCache('websites');
+            dashboardDataManager.clearUserCache(user.uid);
             
-            setLastUpdated(new Date());
+            // Reload dashboard data
+            loadDashboardData(true);
             
             // Show notification for different types of changes
             const addedCount = relevantChanges.filter(c => c.type === 'added').length;
@@ -514,7 +350,7 @@ export default function Dashboard() {
         }
       },
       (error) => {
-        // Real-time listener error - silently disable
+        console.error('Real-time listener error:', error);
         setIsRealTimeActive(false);
       }
     );
@@ -524,7 +360,7 @@ export default function Dashboard() {
         websiteUnsubscribe();
       }
     };
-  }, [user, userProfile, teams, loadWebsitesOptimized]);
+  }, [user, userProfile, teams, loadDashboardData]);
 
   // Real-time listener for topup history changes
   useEffect(() => {
@@ -561,7 +397,11 @@ export default function Dashboard() {
           });
 
           if (relevantNewRecords.length > 0) {
-            // Update today's topup amount directly without reloading all data
+            // Clear cache and update data
+            dashboardDataManager.clearCache('topupHistory');
+            dashboardDataManager.clearUserCache(user.uid);
+            
+            // Update today's topup amount directly for immediate UI response
             const today = new Date().toDateString();
             let newTodayAmount = 0;
             const newWebsiteTopupMap: Record<string, number> = {};
@@ -584,38 +424,33 @@ export default function Dashboard() {
               }
             });
             
-                         if (newTodayAmount > 0) {
-               // Add to existing amounts
-               setTodayTopupAmount(prev => prev + newTodayAmount);
-               setTodayTopupByWebsite(prev => {
-                 const updated = { ...prev };
-                 Object.entries(newWebsiteTopupMap).forEach(([websiteId, amount]) => {
-                   updated[websiteId] = (updated[websiteId] || 0) + amount;
-                 });
-                 return updated;
-               });
-               
-               // Trigger animation for topup amount
-               triggerAnimation('todayTopup');
-             }
-            
-            setLastUpdated(new Date());
-            
-            // Show notification
-            toast.success(
-              `มีการเติมเงินใหม่ ${relevantNewRecords.length} รายการ`,
-              {
+            if (newTodayAmount > 0) {
+              // Add to existing amounts
+              setTodayTopupAmount(prev => prev + newTodayAmount);
+              setTodayTopupByWebsite(prev => {
+                const updated = { ...prev };
+                Object.entries(newWebsiteTopupMap).forEach(([websiteId, amount]) => {
+                  updated[websiteId] = (updated[websiteId] || 0) + amount;
+                });
+                return updated;
+              });
+              
+              // Trigger animation for topup amount
+              triggerAnimation('todayTopup');
+              
+              // Show notification
+              toast.success(`เงินเข้าใหม่ ${newTodayAmount.toLocaleString()} บาท`, {
                 duration: 4000,
                 position: 'top-right',
-              }
-            );
+              });
+            }
           }
           
           setTimeout(() => setIsRealTimeActive(false), 2000);
         }
       },
       (error) => {
-        // Real-time topup listener error - silently disable
+        console.error('Topup real-time listener error:', error);
         setIsRealTimeActive(false);
       }
     );
@@ -625,7 +460,7 @@ export default function Dashboard() {
         topupUnsubscribe();
       }
     };
-  }, [user, userProfile, teams, loadTodayTopupAmount]);
+  }, [user, userProfile, teams, triggerAnimation]);
 
   // Real-time listener for withdraw history changes
   useEffect(() => {
@@ -662,7 +497,11 @@ export default function Dashboard() {
           });
 
           if (relevantNewRecords.length > 0) {
-            // Update today's withdraw amount directly without reloading all data
+            // Clear cache and update data
+            dashboardDataManager.clearCache('withdrawHistory');
+            dashboardDataManager.clearUserCache(user.uid);
+            
+            // Update today's withdraw amount directly for immediate UI response
             const today = new Date().toDateString();
             let newTodayAmount = 0;
             const newWebsiteWithdrawMap: Record<string, number> = {};
@@ -685,38 +524,33 @@ export default function Dashboard() {
               }
             });
             
-                         if (newTodayAmount > 0) {
-               // Add to existing amounts
-               setTodayWithdrawAmount(prev => prev + newTodayAmount);
-               setTodayWithdrawByWebsite(prev => {
-                 const updated = { ...prev };
-                 Object.entries(newWebsiteWithdrawMap).forEach(([websiteId, amount]) => {
-                   updated[websiteId] = (updated[websiteId] || 0) + amount;
-                 });
-                 return updated;
-               });
-               
-               // Trigger animation for withdraw amount
-               triggerAnimation('todayWithdraw');
-             }
-            
-            setLastUpdated(new Date());
-            
-            // Show notification
-            toast.success(
-              `มีการถอนเงินใหม่ ${relevantNewRecords.length} รายการ`,
-              {
+            if (newTodayAmount > 0) {
+              // Add to existing amounts
+              setTodayWithdrawAmount(prev => prev + newTodayAmount);
+              setTodayWithdrawByWebsite(prev => {
+                const updated = { ...prev };
+                Object.entries(newWebsiteWithdrawMap).forEach(([websiteId, amount]) => {
+                  updated[websiteId] = (updated[websiteId] || 0) + amount;
+                });
+                return updated;
+              });
+              
+              // Trigger animation for withdraw amount
+              triggerAnimation('todayWithdraw');
+              
+              // Show notification
+              toast.success(`เงินออกใหม่ ${newTodayAmount.toLocaleString()} บาท`, {
                 duration: 4000,
                 position: 'top-right',
-              }
-            );
+              });
+            }
           }
           
           setTimeout(() => setIsRealTimeActive(false), 2000);
         }
       },
       (error) => {
-        // Real-time withdraw listener error - silently disable
+        console.error('Withdraw real-time listener error:', error);
         setIsRealTimeActive(false);
       }
     );
@@ -726,7 +560,7 @@ export default function Dashboard() {
         withdrawUnsubscribe();
       }
     };
-  }, [user, userProfile, teams, loadTodayWithdrawAmount]);
+  }, [user, userProfile, teams, triggerAnimation]);
 
   const toggleWebsiteStatus = async (id: string) => {
     if (!user) return;
@@ -793,75 +627,76 @@ export default function Dashboard() {
   };
 
   const addWebsite = async () => {
-    if (!user || !newWebsite.name || !newWebsite.url || !newWebsite.apiKey) {
-      toast.error('กรุณากรอกข้อมูลให้ครบทุกช่อง');
-      return;
-    }
-
-    // ตรวจสอบว่ามีทีมหรือไม่
-    if (teams.length === 0) {
-      toast.error('ต้องมีทีมก่อนถึงจะสามารถเพิ่มเว็บไซต์ได้');
-      return;
-    }
-
-    // ตรวจสอบการเลือกทีม
-    if (!newWebsite.teamId) {
-      toast.error('กรุณาเลือกทีมสำหรับเว็บไซต์');
-      return;
-    }
-    
     try {
-      // ใช้ทีมที่เลือก
-      const selectedTeam = teams.find(t => t.id === newWebsite.teamId);
-      
-      if (!selectedTeam) {
-        toast.error('ไม่พบทีมที่เลือก');
+      // Validate input
+      if (!newWebsite.name.trim()) {
+        toast.error('กรุณากรอกชื่อเว็บไซต์');
         return;
       }
       
-      const websiteData = {
-        name: newWebsite.name,
-        url: newWebsite.url,
-        apiKey: newWebsite.apiKey,
-        status: 'inactive',
-        isActive: true, // Set website as active by default
-        balance: 0,
-        dailyTopup: 0,
-        teamId: selectedTeam.id,
-        teamName: selectedTeam.name, // เพิ่มชื่อทีมเพื่อแสดงผล
-        userId: user.uid,
-        createdAt: new Date().toISOString(),
-        lastUpdate: new Date().toISOString(),
-        lastTopupDate: null
-      };
+      if (!newWebsite.url.trim()) {
+        toast.error('กรุณากรอก URL');
+        return;
+      }
+      
+      // URL validation
+      try {
+        new URL(newWebsite.url);
+      } catch {
+        toast.error('กรุณากรอก URL ให้ถูกต้อง');
+        return;
+      }
+      
+      // Generate API key
+      const apiKey = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
       
       // เก็บใน main websites collection
       const websitesRef = collection(db, 'websites');
-      const docRef = await addDoc(websitesRef, websiteData);
       
-      // Add to local state
-      setWebsites([...websites, { id: docRef.id, ...websiteData }]);
+      await addDoc(websitesRef, {
+        name: newWebsite.name.trim(),
+        url: newWebsite.url.trim(),
+        balance: 0,
+        dailyTopup: 0,
+        isActive: true,
+        apiKey: apiKey,
+        createdAt: serverTimestamp(),
+        lastUpdated: serverTimestamp(),
+        userId: user?.uid,
+        teamId: newWebsite.teamId || null
+      });
       
-      // Log website creation
-      if (userProfile) {
-        await logWebsiteCreated(
-          userProfile.uid,
-          userProfile.email,
-          userProfile.displayName,
-          newWebsite.name,
-          newWebsite.url,
-          selectedTeam.name
-        );
-      }
+      // Show success message
+      toast.success('เพิ่มเว็บไซต์สำเร็จ', {
+        duration: 3000,
+        position: 'top-right',
+      });
       
-      setNewWebsite({ name: '', url: '', apiKey: '', teamId: '' });
+      // Reset form
+      setNewWebsite({
+        name: '',
+        url: '',
+        teamId: '',
+        apiKey: ''
+      });
       setShowAddWebsite(false);
       
-      toast.success(`เพิ่มเว็บไซต์ "${newWebsite.name}" ในทีม "${selectedTeam.name}" เรียบร้อย`);
+      // Clear cache and refresh data
+      dashboardDataManager.clearUserCache(user?.uid || '');
+      dashboardDataManager.clearCache('websites');
       
-    } catch (error) {
-      // Error adding website
-      toast.error('ไม่สามารถเพิ่มเว็บไซต์ได้');
+      // Refresh dashboard data
+      await loadDashboardData(true);
+      
+    } catch (error: any) {
+      console.error('Error adding website:', error);
+      
+      // Show error message
+      if (error.code === 'permission-denied') {
+        toast.error('ไม่มีสิทธิ์ในการเพิ่มเว็บไซต์');
+      } else {
+        toast.error('เกิดข้อผิดพลาดในการเพิ่มเว็บไซต์');
+      }
     }
   };
 
@@ -882,85 +717,71 @@ export default function Dashboard() {
   };
 
   const confirmDelete = async () => {
-    if (!user || !deleteConfirm.websiteId) return;
-    
     try {
-      const website = websites.find(w => w.id === deleteConfirm.websiteId);
-      if (!website) return;
+      const { websiteId } = deleteConfirm;
       
-      // ตรวจสอบสิทธิ์ในการลบเว็บไซต์
-      if (website.teamId && !hasTeamPermission(website.teamId, 'websites', 'delete')) {
-        toast.error('คุณไม่มีสิทธิ์ลบเว็บไซต์นี้');
-        hideDeleteConfirm();
-        return;
-      }
+      let targetCollection;
+      let targetTopupCollection;
+      let targetWithdrawCollection;
       
-      // Delete from Firestore - ใช้ main websites collection หรือ user subcollection
-      let websiteRef;
-      if (website?.teamId) {
-        websiteRef = doc(db, 'websites', deleteConfirm.websiteId);
-      } else {
-        websiteRef = doc(db, 'users', user.uid, 'websites', deleteConfirm.websiteId);
-      }
+      // ใช้ main collections
+      targetCollection = collection(db, 'websites');
+      targetTopupCollection = collection(db, 'topupHistory');
+      targetWithdrawCollection = collection(db, 'withdrawHistory');
       
-      await deleteDoc(websiteRef);
+      // Delete related topup history first
+      const topupQuery = query(targetTopupCollection, where('websiteId', '==', websiteId));
+      const topupSnapshot = await getDocs(topupQuery);
       
-      // Delete related topup history records
-      try {
-        const topupHistoryRef = website.teamId 
-          ? collection(db, 'topupHistory')
-          : collection(db, 'users', user.uid, 'topupHistory');
-          
-        const topupQuery = query(topupHistoryRef, where('websiteId', '==', deleteConfirm.websiteId));
-        const topupSnapshot = await getDocs(topupQuery);
-        
-        const topupDeletePromises = topupSnapshot.docs.map(doc => deleteDoc(doc.ref));
-        await Promise.all(topupDeletePromises);
-        
-      } catch (error) {
-        console.error('Error deleting topup history:', error);
-        // Continue with deletion even if history cleanup fails
-      }
+      const topupDeletePromises = topupSnapshot.docs.map(doc => 
+        deleteDoc(doc.ref)
+      );
       
-      // Delete related withdraw history records
-      try {
-        const withdrawHistoryRef = website.teamId 
-          ? collection(db, 'withdrawHistory')
-          : collection(db, 'users', user.uid, 'withdrawHistory');
-          
-        const withdrawQuery = query(withdrawHistoryRef, where('websiteId', '==', deleteConfirm.websiteId));
-        const withdrawSnapshot = await getDocs(withdrawQuery);
-        
-        const withdrawDeletePromises = withdrawSnapshot.docs.map(doc => deleteDoc(doc.ref));
-        await Promise.all(withdrawDeletePromises);
-        
-      } catch (error) {
-        console.error('Error deleting withdraw history:', error);
-        // Continue with deletion even if history cleanup fails
-      }
+      // Delete related withdraw history
+      const withdrawQuery = query(targetWithdrawCollection, where('websiteId', '==', websiteId));
+      const withdrawSnapshot = await getDocs(withdrawQuery);
       
-      // Log website deletion
-      if (userProfile) {
-        const teamName = website.teamName || teams.find(t => t.id === website.teamId)?.name;
-        await logWebsiteDeleted(
-          userProfile.uid,
-          userProfile.email,
-          userProfile.displayName,
-          website.name,
-          website.url,
-          teamName
-        );
-      }
+      const withdrawDeletePromises = withdrawSnapshot.docs.map(doc => 
+        deleteDoc(doc.ref)
+      );
       
-      // Remove from local state
-      setWebsites(websites.filter(website => website.id !== deleteConfirm.websiteId));
+      // Wait for all history deletions to complete
+      await Promise.all([...topupDeletePromises, ...withdrawDeletePromises]);
       
-      toast.success('ลบเว็บไซต์และประวัติที่เกี่ยวข้องเรียบร้อย');
-      hideDeleteConfirm();
+      // Delete the website
+      await deleteDoc(doc(targetCollection, websiteId));
       
-    } catch (error) {
+      // Show success message
+      toast.success('ลบเว็บไซต์สำเร็จ', {
+        duration: 3000,
+        position: 'top-right',
+      });
+      
+      // Reset delete confirm state
+      setDeleteConfirm({
+        show: false,
+        websiteId: '',
+        websiteName: ''
+      });
+      
+      // Clear cache and refresh data
+      dashboardDataManager.clearUserCache(user?.uid || '');
+      dashboardDataManager.clearCache('websites');
+      dashboardDataManager.clearCache('topupHistory');
+      dashboardDataManager.clearCache('withdrawHistory');
+      
+      // Refresh dashboard data
+      await loadDashboardData(true);
+      
+    } catch (error: any) {
       console.error('Error deleting website:', error);
-      toast.error('ไม่สามารถลบเว็บไซต์ได้');
+      
+      // Show error message
+      if (error.code === 'permission-denied') {
+        toast.error('ไม่มีสิทธิ์ในการลบเว็บไซต์');
+      } else {
+        toast.error('เกิดข้อผิดพลาดในการลบเว็บไซต์');
+      }
     }
   };
 
@@ -1028,121 +849,63 @@ export default function Dashboard() {
   };
 
   const executeTopup = async () => {
-    if (!user || !topupConfirm.websiteId || isTopupProcessing) return;
-
-    setIsTopupProcessing(true);
+    if (!user || !userProfile) return;
+    
     try {
-      const website = websites.find(w => w.id === topupConfirm.websiteId);
-      if (!website) return;
-
-      const today = new Date().toISOString().split('T')[0];
-
-      // Use Firestore Transaction to prevent race conditions with Bot API
-      const result = await runTransaction(db, async (transaction) => {
-        // Get website reference
-        let websiteRef;
-        if (website.teamId) {
-          websiteRef = doc(db, 'websites', topupConfirm.websiteId);
-        } else {
-          websiteRef = doc(db, 'users', user.uid, 'websites', topupConfirm.websiteId);
-        }
-
-        // Read current website data within transaction
+      setIsTopupProcessing(true);
+      
+      const { websiteId, amount, note } = topupConfirm;
+      
+      // Log the topup action
+      // logWebsiteTopup(user.uid, websiteId, amount, note);
+      
+      let targetCollection;
+      let targetHistoryCollection;
+      
+      // ใช้ main collections
+      targetCollection = collection(db, 'websites');
+      targetHistoryCollection = collection(db, 'topupHistory');
+      
+      // Use transaction to ensure data consistency
+      await runTransaction(db, async (transaction) => {
+        const websiteRef = doc(targetCollection, websiteId);
         const websiteDoc = await transaction.get(websiteRef);
         
         if (!websiteDoc.exists()) {
-          throw new Error('Website document not found');
+          throw new Error('Website not found');
         }
         
-        const websiteData = websiteDoc.data() as any;
-        const currentBalance = websiteData.balance || 0;
-        const currentDailyTopup = websiteData.dailyTopup || 0;
-
-        // Calculate new balances
-        const newBalance = currentBalance + topupConfirm.amount;
-        const newDailyTopup = currentDailyTopup + topupConfirm.amount;
-
-        // Update website balance atomically
+        const websiteData = websiteDoc.data();
+        const newBalance = (websiteData.balance || 0) + amount;
+        
+        // Update website balance
         transaction.update(websiteRef, {
           balance: newBalance,
-          dailyTopup: newDailyTopup,
-          lastUpdate: new Date().toISOString(),
-          lastTopupDate: today
+          lastUpdated: serverTimestamp()
         });
-
-        return {
-          currentBalance,
-          newBalance,
-          newDailyTopup
-        };
-      });
-
-      // Save topup history (outside transaction for better performance)
-      const topupHistoryRef = website.teamId 
-        ? collection(db, 'topupHistory')
-        : collection(db, 'users', user.uid, 'topupHistory');
         
-      await addDoc(topupHistoryRef, {
-        websiteId: topupConfirm.websiteId,
-        websiteName: topupConfirm.websiteName,
-        teamId: website.teamId || null,
-        amount: topupConfirm.amount,
-        balanceBefore: result.currentBalance,
-        balanceAfter: result.newBalance, // ยอดเงินรวมหลังเติม
-        timestamp: new Date().toISOString(),
-        status: 'completed',
-        topupBy: userProfile?.displayName || user.displayName || user.email || 'ผู้ใช้',
-        topupByUid: user.uid,
-        note: topupConfirm.note || null // เพิ่มหมายเหตุ (optional)
+        // Add to topup history
+        const historyRef = doc(targetHistoryCollection);
+        transaction.set(historyRef, {
+          websiteId: websiteId,
+          websiteName: websiteData.name || 'Unknown',
+          amount: amount,
+          note: note || '',
+          timestamp: serverTimestamp(),
+          createdBy: user.uid,
+          createdByName: userProfile.displayName || userProfile.username || 'Unknown',
+          teamId: websiteData.teamId || null,
+          type: 'topup'
+        });
       });
-
-      // Update local state
-      setWebsites(websites.map(w => 
-        w.id === topupConfirm.websiteId 
-          ? { ...w, balance: result.newBalance, dailyTopup: result.newDailyTopup, lastUpdate: 'เพิ่งอัพเดท', lastTopupDate: today }
-          : w
-      ));
-
-      // Trigger animation for website balance and total balance
-      triggerAnimation('totalBalance');
-      triggerAnimation('todayTopup', topupConfirm.websiteId);
-
-      // Update stats
-      const totalBalance = websites.reduce((sum, site: any) => 
-        site.id === topupConfirm.websiteId ? sum + result.newBalance : sum + (site.balance || 0), 0
-      );
-      const totalDailyTopup = websites.reduce((sum, site: any) => 
-        site.id === topupConfirm.websiteId ? sum + result.newDailyTopup : sum + (site.dailyTopup || 0), 0
-      );
-
-      setStats({
-        totalBalance,
-        monthlyIncome: totalDailyTopup * 30,
-        monthlyExpense: totalBalance * 0.1,
-        savings: totalBalance * 0.8
+      
+      // Show success message
+      toast.success(`เติมเงินสำเร็จ ${amount.toLocaleString()} บาท`, {
+        duration: 4000,
+        position: 'top-right',
       });
-
-      // Log website topup
-      if (userProfile) {
-        const teamName = website.teamName || teams.find(t => t.id === website.teamId)?.name;
-        await logWebsiteTopup(
-          userProfile.uid,
-          userProfile.email,
-          userProfile.displayName,
-          topupConfirm.websiteName,
-          topupConfirm.amount,
-          teamName
-        );
-      }
-
-      toast.success(`เติมเงิน ฿${topupConfirm.amount.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} สำเร็จ`);
       
-      // Refresh today's topup amount
-      loadTodayTopupAmount();
-      
-      // Clear topup history cache to force refresh when user navigates to topup-history page
-      cacheManager.clearCache(CACHE_KEYS.TOPUP_HISTORY);
-      
+      // Reset form
       setTopupConfirm({
         show: false,
         websiteId: '',
@@ -1150,12 +913,29 @@ export default function Dashboard() {
         amount: 0,
         note: ''
       });
-      setTopupAmount('');
-      setTopupNote('');
       
-    } catch (error) {
+      // Trigger animation
+      triggerAnimation('totalBalance', websiteId);
+      
+      // Clear cache and refresh data
+      dashboardDataManager.clearUserCache(user.uid);
+      dashboardDataManager.clearCache('websites');
+      dashboardDataManager.clearCache('topupHistory');
+      
+      // Refresh dashboard data
+      await loadDashboardData(true);
+      
+    } catch (error: any) {
       console.error('Error executing topup:', error);
-      toast.error('ไม่สามารถเติมเงินได้ กรุณาลองใหม่อีกครั้ง');
+      
+      // Show error message
+      if (error.code === 'permission-denied') {
+        toast.error('ไม่มีสิทธิ์ในการเติมเงิน');
+      } else if (error.code === 'not-found') {
+        toast.error('ไม่พบข้อมูลเว็บไซต์');
+      } else {
+        toast.error('เกิดข้อผิดพลาดในการเติมเงิน กรุณาลองใหม่อีกครั้ง');
+      }
     } finally {
       setIsTopupProcessing(false);
     }
@@ -1227,106 +1007,67 @@ export default function Dashboard() {
   };
 
   const executeWithdraw = async () => {
-    if (!user || !withdrawConfirm.websiteId) return;
-
+    if (!user || !userProfile) return;
+    
     try {
-      const website = websites.find(w => w.id === withdrawConfirm.websiteId);
-      if (!website) return;
+      setIsTopupProcessing(true);
       
-      // ตรวจสอบสิทธิ์ในการถอนเงิน
-      if (website.teamId && !hasTeamPermission(website.teamId, 'topup', 'create')) {
-        toast.error('คุณไม่มีสิทธิ์ถอนเงินสำหรับเว็บไซต์นี้');
-        setWithdrawConfirm({ show: false, websiteId: '', websiteName: '', amount: 0, note: '' });
-        return;
-      }
-
-      const today = new Date().toISOString().split('T')[0];
-
-      // Use Firestore Transaction to prevent race conditions with Bot API
-      const result = await runTransaction(db, async (transaction) => {
-        // Get website reference
-        let websiteRef;
-        if (website.teamId) {
-          websiteRef = doc(db, 'websites', withdrawConfirm.websiteId);
-        } else {
-          websiteRef = doc(db, 'users', user.uid, 'websites', withdrawConfirm.websiteId);
-        }
-
-        // Read current website data within transaction
+      const { websiteId, amount, note } = withdrawConfirm;
+      
+      let targetCollection;
+      let targetHistoryCollection;
+      
+      // ใช้ main collections
+      targetCollection = collection(db, 'websites');
+      targetHistoryCollection = collection(db, 'withdrawHistory');
+      
+      // Use transaction to ensure data consistency
+      await runTransaction(db, async (transaction) => {
+        const websiteRef = doc(targetCollection, websiteId);
         const websiteDoc = await transaction.get(websiteRef);
         
         if (!websiteDoc.exists()) {
-          throw new Error('Website document not found');
+          throw new Error('Website not found');
         }
         
-        const websiteData = websiteDoc.data() as any;
+        const websiteData = websiteDoc.data();
         const currentBalance = websiteData.balance || 0;
-
-        // Check balance again within transaction (most up-to-date)
-        if (currentBalance < withdrawConfirm.amount) {
-          throw new Error('Insufficient balance. Current balance may have changed.');
+        
+        // Check if there's enough balance
+        if (currentBalance < amount) {
+          throw new Error('Insufficient balance');
         }
-
-        // Calculate new balance
-        const newBalance = currentBalance - withdrawConfirm.amount;
-
-        // Update website balance atomically
+        
+        const newBalance = currentBalance - amount;
+        
+        // Update website balance
         transaction.update(websiteRef, {
           balance: newBalance,
-          lastUpdate: new Date().toISOString(),
-          lastWithdrawDate: today
+          lastUpdated: serverTimestamp()
         });
-
-        return {
-          currentBalance,
-          newBalance
-        };
-      });
-
-      // Save withdraw history (outside transaction for better performance)
-      const withdrawHistoryRef = website.teamId 
-        ? collection(db, 'withdrawHistory')
-        : collection(db, 'users', user.uid, 'withdrawHistory');
         
-      await addDoc(withdrawHistoryRef, {
-        websiteId: withdrawConfirm.websiteId,
-        websiteName: withdrawConfirm.websiteName,
-        teamId: website.teamId || null,
-        amount: withdrawConfirm.amount,
-        balanceBefore: result.currentBalance,
-        balanceAfter: result.newBalance,
-        timestamp: new Date().toISOString(),
-        status: 'completed',
-        withdrawBy: userProfile?.displayName || user.displayName || user.email || 'ผู้ใช้',
-        withdrawByUid: user.uid,
-        note: withdrawConfirm.note || null
+        // Add to withdraw history
+        const historyRef = doc(targetHistoryCollection);
+        transaction.set(historyRef, {
+          websiteId: websiteId,
+          websiteName: websiteData.name || 'Unknown',
+          amount: amount,
+          note: note || '',
+          timestamp: serverTimestamp(),
+          createdBy: user.uid,
+          createdByName: userProfile.displayName || userProfile.username || 'Unknown',
+          teamId: websiteData.teamId || null,
+          type: 'withdraw'
+        });
       });
-
-      // Update local state
-      setWebsites(websites.map(w => 
-        w.id === withdrawConfirm.websiteId 
-          ? { ...w, balance: result.newBalance, lastUpdate: 'เพิ่งอัพเดท', lastWithdrawDate: today }
-          : w
-      ));
-
-      // Trigger animation for website balance and total balance
-      triggerAnimation('totalBalance');
-      triggerAnimation('todayWithdraw', withdrawConfirm.websiteId);
-
-      // Update stats
-      const totalBalance = websites.reduce((sum, site: any) => 
-        site.id === withdrawConfirm.websiteId ? sum + result.newBalance : sum + (site.balance || 0), 0
-      );
-
-      setStats({
-        totalBalance,
-        monthlyIncome: totalBalance * 0.3,
-        monthlyExpense: totalBalance * 0.1,
-        savings: totalBalance * 0.8
-      });
-
-      toast.success(`ถอนเงิน ฿${withdrawConfirm.amount.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} สำเร็จ`);
       
+      // Show success message
+      toast.success(`ถอนเงินสำเร็จ ${amount.toLocaleString()} บาท`, {
+        duration: 4000,
+        position: 'top-right',
+      });
+      
+      // Reset form
       setWithdrawConfirm({
         show: false,
         websiteId: '',
@@ -1334,16 +1075,33 @@ export default function Dashboard() {
         amount: 0,
         note: ''
       });
-      setWithdrawAmount('');
-      setWithdrawNote('');
       
-    } catch (error) {
-      console.error('Error during withdraw:', error);
-      if (error instanceof Error && error.message.includes('Insufficient balance')) {
-        toast.error('ยอดเงินในเว็บไซต์ไม่เพียงพอสำหรับการถอน (ยอดอาจเปลี่ยนแปลงขณะทำรายการ)');
+      // Trigger animation
+      triggerAnimation('totalBalance', websiteId);
+      
+      // Clear cache and refresh data
+      dashboardDataManager.clearUserCache(user.uid);
+      dashboardDataManager.clearCache('websites');
+      dashboardDataManager.clearCache('withdrawHistory');
+      
+      // Refresh dashboard data
+      await loadDashboardData(true);
+      
+    } catch (error: any) {
+      console.error('Error executing withdraw:', error);
+      
+      // Show error message
+      if (error.code === 'permission-denied') {
+        toast.error('ไม่มีสิทธิ์ในการถอนเงิน');
+      } else if (error.code === 'not-found') {
+        toast.error('ไม่พบข้อมูลเว็บไซต์');
+      } else if (error.message === 'Insufficient balance') {
+        toast.error('ยอดเงินไม่เพียงพอ');
       } else {
-        toast.error('ไม่สามารถถอนเงินได้ กรุณาลองใหม่อีกครั้ง');
+        toast.error('เกิดข้อผิดพลาดในการถอนเงิน กรุณาลองใหม่อีกครั้ง');
       }
+    } finally {
+      setIsTopupProcessing(false);
     }
   };
 
@@ -1501,7 +1259,7 @@ export default function Dashboard() {
             </div>
             <div className="flex flex-wrap items-center gap-3">
               <button
-                onClick={handleRefreshWebsites}
+                onClick={handleRefreshDashboard}
                 disabled={refreshing}
                 className="flex items-center gap-2 px-3 py-2 text-sm bg-gray-50 hover:bg-gray-100 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-300 rounded-lg transition-colors disabled:opacity-50"
               >
