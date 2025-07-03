@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { usePermission } from '../../hooks/usePermission';
 import { collection, query, orderBy, limit, startAfter, getDocs, where, QuerySnapshot, DocumentData } from 'firebase/firestore';
@@ -49,15 +49,29 @@ export default function AuditLogsPage() {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
-  const [lastDoc, setLastDoc] = useState<any>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [actionFilter, setActionFilter] = useState('all');
   const [successFilter, setSuccessFilter] = useState('all');
   const [selectedLog, setSelectedLog] = useState<AuditLog | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
+  
+  // Use useRef for lastDoc to prevent re-renders
+  const lastDocRef = useRef<any>(null);
+  const isLoadingRef = useRef(false);
 
   // Check permission
-  if (!canAccessAdminPanel()) {
+  const hasPermission = canAccessAdminPanel();
+  
+  console.log('Component render:', {
+    user: !!user,
+    userEmail: user?.email,
+    hasPermission,
+    loading,
+    auditLogsLength: auditLogs.length
+  });
+
+  if (!hasPermission && user) {
+    // Only show no permission if user is loaded but doesn't have permission
     return (
       <DashboardLayout title="Audit Logs" subtitle="ข้อมูลการตรวจสอบระบบ">
         <div className="text-center py-16">
@@ -75,11 +89,30 @@ export default function AuditLogsPage() {
 
   // Load audit logs
   const loadAuditLogs = useCallback(async (reset = false) => {
+    // Prevent multiple concurrent loads
+    if (isLoadingRef.current) {
+      console.log('Already loading, skipping');
+      return;
+    }
+    
+    // Check permission before loading
+    const currentPermission = canAccessAdminPanel();
+    if (!currentPermission) {
+      console.log('No permission to access admin panel, skipping load');
+      setLoading(false);
+      setLoadingMore(false);
+      return;
+    }
+    
+    console.log('Starting loadAuditLogs', { reset, successFilter });
+    
     try {
+      isLoadingRef.current = true;
+      
       if (reset) {
         setLoading(true);
         setAuditLogs([]);
-        setLastDoc(null);
+        lastDocRef.current = null;
         setHasMore(true);
       } else {
         setLoadingMore(true);
@@ -97,15 +130,20 @@ export default function AuditLogsPage() {
       }
 
       // Add pagination
-      if (!reset && lastDoc) {
-        q = query(q, startAfter(lastDoc));
+      if (!reset && lastDocRef.current) {
+        q = query(q, startAfter(lastDocRef.current));
       }
 
+      console.log('Executing Firebase query...');
       const snapshot = await getDocs(q);
+      console.log('Firebase query completed, docs count:', snapshot.docs.length);
+      
       const newLogs = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
       })) as AuditLog[];
+
+      console.log('Processed logs:', newLogs.length);
 
       if (reset) {
         setAuditLogs(newLogs);
@@ -113,24 +151,48 @@ export default function AuditLogsPage() {
         setAuditLogs(prev => [...prev, ...newLogs]);
       }
 
-      setLastDoc(snapshot.docs[snapshot.docs.length - 1]);
+      if (snapshot.docs.length > 0) {
+        lastDocRef.current = snapshot.docs[snapshot.docs.length - 1];
+      }
       setHasMore(snapshot.docs.length === ITEMS_PER_PAGE);
 
     } catch (error) {
       console.error('Error loading audit logs:', error);
       toast.error('ไม่สามารถโหลดข้อมูล audit logs ได้');
     } finally {
+      console.log('loadAuditLogs completed');
       setLoading(false);
       setLoadingMore(false);
+      isLoadingRef.current = false;
     }
-  }, [successFilter, lastDoc]);
+  }, [successFilter]);
 
   // Initial load
   useEffect(() => {
-    if (user && canAccessAdminPanel()) {
+    console.log('Initial load useEffect triggered', { user: !!user, hasPermission });
+    if (user) {
+      console.log('User available, calling loadAuditLogs(true)');
       loadAuditLogs(true);
     }
-  }, [user, canAccessAdminPanel, loadAuditLogs]);
+  }, [user]);
+
+  // Handle filter changes
+  useEffect(() => {
+    console.log('Filter change useEffect triggered', { successFilter, user: !!user, hasPermission });
+    if (user) {
+      console.log('Calling loadAuditLogs(true) due to filter change');
+      loadAuditLogs(true);
+    }
+  }, [successFilter]);
+
+  // Handle permission changes
+  useEffect(() => {
+    console.log('Permission change useEffect triggered', { hasPermission, user: !!user });
+    if (user && hasPermission && auditLogs.length === 0 && !loading) {
+      console.log('Permission granted and no data loaded, calling loadAuditLogs(true)');
+      loadAuditLogs(true);
+    }
+  }, [hasPermission]);
 
   // Filter audit logs
   const filteredLogs = auditLogs.filter(log => {
@@ -297,6 +359,14 @@ export default function AuditLogsPage() {
               <div className="text-sm text-gray-500 dark:text-gray-400">
                 แสดง {filteredLogs.length} จาก {auditLogs.length} รายการ
               </div>
+              
+              {/* Debug Info */}
+              <div className="text-xs bg-gray-100 dark:bg-gray-700 p-2 rounded">
+                <div>User: {user ? '✅' : '❌'}</div>
+                <div>Permission: {hasPermission ? '✅' : '❌'}</div>
+                <div>Loading: {loading ? '🔄' : '❌'}</div>
+              </div>
+              
               <button
                 onClick={() => loadAuditLogs(true)}
                 disabled={loading}

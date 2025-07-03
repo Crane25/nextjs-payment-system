@@ -256,29 +256,6 @@ export async function POST(request: NextRequest) {
         const transactionRef = doc(collection(db, 'transactions'));
         transaction.set(transactionRef, transactionData);
 
-        // Create audit log
-        const auditLogData = {
-          action: 'withdraw_request',
-          apiEndpoint: '/api/team/transactions',
-          teamId: apiTeamId,
-          teamName: teamName,
-          websiteId: websiteId,
-          websiteName: websiteName,
-          transactionId: requestData.transactionId,
-          customerUsername: requestData.customerUsername,
-          amount: requestData.amount,
-          balanceBefore: currentBalance,
-          balanceAfter: newBalance,
-          idempotencyKey: idempotencyKey,
-          timestamp: serverTimestamp(),
-          success: true,
-          userAgent: request.headers.get('User-Agent') || 'Unknown',
-          ip: request.headers.get('X-Forwarded-For') || 'Unknown'
-        };
-
-        const auditRef = doc(collection(db, 'audit_logs'));
-        transaction.set(auditRef, auditLogData);
-
         return {
           transactionId: transactionRef.id,
           transactionData: {
