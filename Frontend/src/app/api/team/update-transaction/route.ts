@@ -3,6 +3,8 @@ import { collection, query, where, getDocs, getDoc, updateDoc, doc, serverTimest
 import { db } from '@/lib/firebase';
 
 export async function POST(request: NextRequest) {
+  let requestData: any = {};
+  
   try {
     // Get API key from Authorization header
     const authHeader = request.headers.get('Authorization');
@@ -20,7 +22,7 @@ export async function POST(request: NextRequest) {
     const providedApiKey = authHeader.replace('Bearer ', '');
 
     // Parse request body
-    const requestData = await request.json();
+    requestData = await request.json();
 
     // Validate required fields
     if (!requestData.id) {
@@ -196,32 +198,6 @@ export async function POST(request: NextRequest) {
 
         transaction.update(transactionDocRef, updateData);
 
-        // Create audit log
-        const auditLogData = {
-          action: 'transaction_status_update',
-          apiEndpoint: '/api/team/update-transaction',
-          teamId: teamId,
-          teamName: teamName,
-          transactionId: requestData.id,
-          originalTransactionId: transactionData.transactionId,
-          customerUsername: transactionData.customerUsername,
-          websiteId: transactionData.websiteId,
-          websiteName: websiteName,
-          oldStatus: transactionData.status,
-          newStatus: requestData.status,
-          amount: transactionData.amount,
-          refundAmount: websiteUpdated ? refundAmount : 0,
-          websiteUpdated: websiteUpdated,
-          note: requestData.note || null,
-          timestamp: serverTimestamp(),
-          success: true,
-          userAgent: request.headers.get('User-Agent') || 'Unknown',
-          ip: request.headers.get('X-Forwarded-For') || 'Unknown'
-        };
-
-        const auditRef = doc(collection(db, 'audit_logs'));
-        transaction.set(auditRef, auditLogData);
-
         return {
           alreadyCompleted: false,
           transactionData: transactionData,
@@ -285,18 +261,66 @@ export async function POST(request: NextRequest) {
     } catch (dbError) {
       console.error('Database error:', dbError);
       
-      // Create error audit log
+      // Create enhanced error audit log with detailed transaction information
       try {
+        // Get transaction details for audit log if possible
+        let transactionDetails = {};
+        try {
+          const transactionDocRef = doc(db, 'transactions', requestData.id);
+          const transactionDoc = await getDoc(transactionDocRef);
+          
+          if (transactionDoc.exists()) {
+            const transactionData = transactionDoc.data() as any;
+            transactionDetails = {
+              originalTransactionId: transactionData.transactionId || '',
+              customerUsername: transactionData.customerUsername || '',
+              websiteId: transactionData.websiteId || '',
+              websiteName: transactionData.websiteName || '',
+              bankName: transactionData.bankName || '',
+              accountNumber: transactionData.accountNumber || '',
+              realName: transactionData.realName || '',
+              amount: transactionData.amount || 0,
+              currentStatus: transactionData.status || '',
+              balanceBefore: transactionData.balanceBefore || 0,
+              balanceAfter: transactionData.balanceAfter || 0,
+              createdAt: transactionData.createdAt || null,
+              type: transactionData.type || '',
+              teamId: transactionData.teamId || '',
+              teamName: transactionData.teamName || ''
+            };
+          }
+        } catch (detailsError) {
+          console.error('Failed to get transaction details for audit log:', detailsError);
+        }
+
         await addDoc(collection(db, 'audit_logs'), {
           action: 'transaction_status_update_failed',
           apiEndpoint: '/api/team/update-transaction',
           error: dbError instanceof Error ? dbError.message : 'Unknown database error',
+          errorType: dbError instanceof Error ? dbError.name : 'UnknownError',
           transactionId: requestData.id,
           requestedStatus: requestData.status,
+          requestedNote: requestData.note || null,
+          
+          // Enhanced transaction details
+          transactionDetails: transactionDetails,
+          
+          // Request metadata
+          requestBody: {
+            id: requestData.id,
+            status: requestData.status,
+            note: requestData.note || null
+          },
+          
+          // System metadata
           timestamp: serverTimestamp(),
           success: false,
           userAgent: request.headers.get('User-Agent') || 'Unknown',
-          ip: request.headers.get('X-Forwarded-For') || 'Unknown'
+          ip: request.headers.get('X-Forwarded-For') || 'Unknown',
+          referer: request.headers.get('Referer') || 'Unknown',
+          
+          // Additional debugging info
+          stackTrace: dbError instanceof Error ? dbError.stack : null
         });
       } catch (auditError) {
         console.error('Failed to create error audit log:', auditError);
@@ -314,6 +338,70 @@ export async function POST(request: NextRequest) {
 
   } catch (error) {
     console.error('Server error:', error);
+    
+    // Create enhanced error audit log for server errors
+    try {
+      // Get transaction details for audit log if possible
+      let transactionDetails = {};
+      if (requestData?.id) {
+        try {
+          const transactionDocRef = doc(db, 'transactions', requestData.id);
+          const transactionDoc = await getDoc(transactionDocRef);
+          
+          if (transactionDoc.exists()) {
+            const transactionData = transactionDoc.data() as any;
+            transactionDetails = {
+              originalTransactionId: transactionData.transactionId || '',
+              customerUsername: transactionData.customerUsername || '',
+              websiteId: transactionData.websiteId || '',
+              websiteName: transactionData.websiteName || '',
+              bankName: transactionData.bankName || '',
+              accountNumber: transactionData.accountNumber || '',
+              realName: transactionData.realName || '',
+              amount: transactionData.amount || 0,
+              currentStatus: transactionData.status || '',
+              balanceBefore: transactionData.balanceBefore || 0,
+              balanceAfter: transactionData.balanceAfter || 0,
+              createdAt: transactionData.createdAt || null,
+              type: transactionData.type || '',
+              teamId: transactionData.teamId || '',
+              teamName: transactionData.teamName || ''
+            };
+          }
+        } catch (detailsError) {
+          console.error('Failed to get transaction details for audit log:', detailsError);
+        }
+      }
+
+      await addDoc(collection(db, 'audit_logs'), {
+        action: 'transaction_status_update_server_error',
+        apiEndpoint: '/api/team/update-transaction',
+        error: error instanceof Error ? error.message : 'Unknown server error',
+        errorType: error instanceof Error ? error.name : 'UnknownError',
+        transactionId: requestData?.id || 'Unknown',
+        requestedStatus: requestData?.status || 'Unknown',
+        requestedNote: requestData?.note || null,
+        
+        // Enhanced transaction details
+        transactionDetails: transactionDetails,
+        
+        // Request metadata
+        requestBody: requestData || {},
+        
+        // System metadata
+        timestamp: serverTimestamp(),
+        success: false,
+        userAgent: request.headers.get('User-Agent') || 'Unknown',
+        ip: request.headers.get('X-Forwarded-For') || 'Unknown',
+        referer: request.headers.get('Referer') || 'Unknown',
+        
+        // Additional debugging info
+        stackTrace: error instanceof Error ? error.stack : null
+      });
+    } catch (auditError) {
+      console.error('Failed to create server error audit log:', auditError);
+    }
+    
     return NextResponse.json(
       { 
         success: false,

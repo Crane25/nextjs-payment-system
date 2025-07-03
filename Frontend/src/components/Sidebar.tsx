@@ -106,6 +106,14 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, setIsOpen }) => {
       iconSolid: UserGroupIconSolid,
       current: pathname === '/admin-teams'
     }] : []),
+    // Audit Logs สำหรับ admin เท่านั้น
+    ...(canAccessAdminPanel() ? [{
+      name: 'Audit Logs',
+      href: '/audit-logs',
+      icon: DocumentTextIcon,
+      iconSolid: DocumentTextIconSolid,
+      current: pathname === '/audit-logs'
+    }] : []),
     // System Logs สำหรับ admin เท่านั้น
     ...(canAccessAdminPanel() ? [{
       name: 'System Logs',
