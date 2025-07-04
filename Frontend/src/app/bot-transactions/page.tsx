@@ -500,10 +500,73 @@ export default function BotTransactionsPage() {
               </div>
             </div>
             <div className="flex items-center gap-3">
-              {/* Status Cards */}
+              {/* Summary Cards */}
               <div className="flex items-center gap-4">
-                {/* รอโอน Card */}
-                <div className="flex items-center gap-3 bg-gradient-to-r from-yellow-50 to-orange-50 dark:from-yellow-900/30 dark:to-orange-900/30 px-4 py-3 rounded-xl border border-yellow-200/50 dark:border-yellow-600/30 shadow-sm">
+                {/* รอโอน Amount Card */}
+                <div className="flex items-center gap-3 bg-gradient-to-r from-yellow-50 to-orange-50 dark:from-yellow-900/30 dark:to-orange-900/30 px-4 py-3 rounded-xl border border-yellow-200/50 dark:border-yellow-600/30 shadow-lg hover:shadow-xl transition-all duration-300">
+                  <div className="flex items-center justify-center w-10 h-10 bg-gradient-to-br from-yellow-400 to-orange-500 rounded-xl shadow-lg">
+                    <span className="text-xl text-white animate-bounce">💰</span>
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="text-xs font-semibold text-yellow-600 dark:text-yellow-400 uppercase tracking-wider">จำนวนเงินรอโอน</span>
+                    {loading ? (
+                      <div className="h-6 w-20 bg-yellow-300 dark:bg-yellow-600 rounded animate-pulse mt-1"></div>
+                    ) : (
+                      <span className="text-2xl font-bold text-yellow-700 dark:text-yellow-300">
+                        ฿{transactions
+                          .filter(t => t.status === 'รอโอน')
+                          .reduce((sum, t) => sum + t.amount, 0)
+                          .toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                
+                {/* กำลังโอน Amount Card */}
+                <div className="flex items-center gap-3 bg-gradient-to-r from-blue-50 to-cyan-50 dark:from-blue-900/30 dark:to-cyan-900/30 px-4 py-3 rounded-xl border border-blue-200/50 dark:border-blue-600/30 shadow-lg hover:shadow-xl transition-all duration-300">
+                  <div className="flex items-center justify-center w-10 h-10 bg-gradient-to-br from-blue-400 to-cyan-500 rounded-xl shadow-lg">
+                    <span className="text-xl text-white animate-pulse">💸</span>
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="text-xs font-semibold text-blue-600 dark:text-blue-400 uppercase tracking-wider">จำนวนเงินกำลังโอน</span>
+                    {loading ? (
+                      <div className="h-6 w-20 bg-blue-300 dark:bg-blue-600 rounded animate-pulse mt-1"></div>
+                    ) : (
+                      <span className="text-2xl font-bold text-blue-700 dark:text-blue-300">
+                        ฿{transactions
+                          .filter(t => t.status === 'กำลังโอน')
+                          .reduce((sum, t) => sum + t.amount, 0)
+                          .toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* ยอดรวม Total Amount Card */}
+                <div className="flex items-center gap-3 bg-gradient-to-r from-purple-50 to-indigo-50 dark:from-purple-900/30 dark:to-indigo-900/30 px-4 py-3 rounded-xl border border-purple-200/50 dark:border-purple-600/30 shadow-lg hover:shadow-xl transition-all duration-300">
+                  <div className="flex items-center justify-center w-10 h-10 bg-gradient-to-br from-purple-400 to-indigo-500 rounded-xl shadow-lg">
+                    <span className="text-xl text-white animate-pulse">💎</span>
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="text-xs font-semibold text-purple-600 dark:text-purple-400 uppercase tracking-wider">ยอดรวม</span>
+                    {loading ? (
+                      <div className="h-6 w-20 bg-purple-300 dark:bg-purple-600 rounded animate-pulse mt-1"></div>
+                    ) : (
+                      <span className="text-2xl font-bold text-purple-700 dark:text-purple-300">
+                        ฿{transactions
+                          .filter(t => t.status === 'รอโอน' || t.status === 'กำลังโอน')
+                          .reduce((sum, t) => sum + t.amount, 0)
+                          .toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Count Cards */}
+              <div className="flex items-center gap-4 ml-4 pl-4 border-l border-gray-200 dark:border-gray-600">
+                {/* รอโอน Count Card */}
+                <div className="flex items-center gap-3 bg-gradient-to-r from-yellow-50 to-orange-50 dark:from-yellow-900/30 dark:to-orange-900/30 px-4 py-3 rounded-xl border border-yellow-200/50 dark:border-yellow-600/30 shadow-sm hover:shadow-md transition-all duration-300">
                   <div className="flex items-center justify-center w-8 h-8 bg-yellow-100 dark:bg-yellow-800/50 rounded-lg">
                     <span className="text-lg text-yellow-600 dark:text-yellow-400 animate-spin" style={{animationDuration: '2s'}}>⏳</span>
                   </div>
@@ -519,8 +582,8 @@ export default function BotTransactionsPage() {
                   </div>
                 </div>
                 
-                {/* กำลังโอน Card */}
-                <div className="flex items-center gap-3 bg-gradient-to-r from-blue-50 to-cyan-50 dark:from-blue-900/30 dark:to-cyan-900/30 px-4 py-3 rounded-xl border border-blue-200/50 dark:border-blue-600/30 shadow-sm">
+                {/* กำลังโอน Count Card */}
+                <div className="flex items-center gap-3 bg-gradient-to-r from-blue-50 to-cyan-50 dark:from-blue-900/30 dark:to-cyan-900/30 px-4 py-3 rounded-xl border border-blue-200/50 dark:border-blue-600/30 shadow-sm hover:shadow-md transition-all duration-300">
                   <div className="flex items-center justify-center w-8 h-8 bg-blue-100 dark:bg-blue-800/50 rounded-lg">
                     <span className="text-lg text-blue-600 dark:text-blue-400">🔄</span>
                   </div>
@@ -537,12 +600,9 @@ export default function BotTransactionsPage() {
                 </div>
               </div>
 
-              <div className="text-sm text-gray-500 dark:text-gray-400">
-                อัพเดทล่าสุด: {lastUpdated.toLocaleTimeString('th-TH')}
-              </div>
               <button
                 onClick={handleRefresh}
-                className="flex items-center gap-2 px-4 py-2 text-sm bg-blue-50 hover:bg-blue-100 dark:bg-blue-900/20 dark:hover:bg-blue-900/40 text-blue-600 dark:text-blue-400 rounded-lg"
+                className="flex items-center gap-2 px-4 py-2 text-sm bg-blue-50 hover:bg-blue-100 dark:bg-blue-900/20 dark:hover:bg-blue-900/40 text-blue-600 dark:text-blue-400 rounded-lg ml-4"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
