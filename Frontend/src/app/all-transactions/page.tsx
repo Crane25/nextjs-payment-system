@@ -129,6 +129,7 @@ export default function BotTransactionsPage() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [selectedTeamFilter, setSelectedTeamFilter] = useState<'all' | string>('all');
   const [selectedDate, setSelectedDate] = useState<string>(getLocalDateString()); // YYYY-MM-DD format
+  const [showModifiedOnly, setShowModifiedOnly] = useState(false); // เพิ่ม state สำหรับกรองรายการที่ถูกแก้ไขสถานะ
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
   const [showAllData, setShowAllData] = useState(true);
   const [isDataLoaded, setIsDataLoaded] = useState(false); // เพิ่ม state เพื่อเช็คว่าข้อมูลถูกโหลดแล้วหรือไม่
@@ -803,7 +804,13 @@ export default function BotTransactionsPage() {
       // Team filter
       const matchesTeam = selectedTeamFilter === 'all' || transaction.teamId === selectedTeamFilter;
 
-      return matchesSearch && matchesStatus && matchesTeam;
+      // Modified filter - แสดงเฉพาะรายการที่ถูกแก้ไขสถานะ
+      const matchesModified = !showModifiedOnly || 
+        (transaction.lastModifiedBy && transaction.lastModifiedBy.trim() !== '') ||
+        (transaction.lastModifiedByEmail && transaction.lastModifiedByEmail.trim() !== '') ||
+        (transaction.lastModifiedAt && transaction.lastModifiedAt !== null);
+
+      return matchesSearch && matchesStatus && matchesTeam && matchesModified;
     });
 
     // Sort by created date (newest first) - รายการที่สร้างล่าสุดอยู่ด้านบน
@@ -873,7 +880,7 @@ export default function BotTransactionsPage() {
       <div className="space-y-6 lg:space-y-8">
 
         {/* Enhanced Stats Cards with Status Groups */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7 gap-4 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8 gap-4 mb-8">
           {/* Pending Status */}
           <div className="bg-gradient-to-r from-yellow-500 to-orange-500 rounded-2xl p-5 text-white">
             <div className="flex items-center justify-between">
@@ -929,6 +936,25 @@ export default function BotTransactionsPage() {
                 </div>
                 <p className="text-2xl font-bold">
                   {transactions.filter(t => ['ยกเลิก', 'ล้มเหลว'].includes(t.status)).length}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Modified Status Card */}
+          <div className="bg-gradient-to-r from-orange-500 to-red-500 rounded-2xl p-5 text-white">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="flex items-center gap-1 mb-1">
+                  <span className="text-lg">🔧</span>
+                  <p className="text-orange-100 text-sm font-medium">ถูกแก้ไขสถานะ</p>
+                </div>
+                <p className="text-2xl font-bold">
+                  {transactions.filter(t => 
+                    (t.lastModifiedBy && t.lastModifiedBy.trim() !== '') ||
+                    (t.lastModifiedByEmail && t.lastModifiedByEmail.trim() !== '') ||
+                    (t.lastModifiedAt && t.lastModifiedAt !== null)
+                  ).length}
                 </p>
               </div>
             </div>
@@ -1101,14 +1127,39 @@ export default function BotTransactionsPage() {
                 </select>
               </div>
 
+              {/* Modified Filter - แสดงเฉพาะรายการที่ถูกแก้ไขสถานะ */}
+              <div className="flex items-center space-x-2">
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300 whitespace-nowrap">
+                  รายการที่แก้ไข:
+                </label>
+                <div className="relative">
+                  <select
+                    value={showModifiedOnly ? 'modified' : 'all'}
+                    onChange={(e) => setShowModifiedOnly(e.target.value === 'modified')}
+                    className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                  >
+                    <option value="all">ทั้งหมด</option>
+                    <option value="modified">🔧 ที่ถูกแก้ไขสถานะ ({transactions.filter(t => 
+                      (t.lastModifiedBy && t.lastModifiedBy.trim() !== '') ||
+                      (t.lastModifiedByEmail && t.lastModifiedByEmail.trim() !== '') ||
+                      (t.lastModifiedAt && t.lastModifiedAt !== null)
+                    ).length})</option>
+                  </select>
+                  {showModifiedOnly && (
+                    <div className="absolute -top-1 -right-1 w-3 h-3 bg-orange-500 rounded-full animate-pulse"></div>
+                  )}
+                </div>
+              </div>
+
               {/* Enhanced Clear Filters Button */}
-              {(searchTerm || statusFilter !== 'all' || selectedTeamFilter !== 'all' || selectedDate !== getLocalDateString()) && (
+              {(searchTerm || statusFilter !== 'all' || selectedTeamFilter !== 'all' || selectedDate !== getLocalDateString() || showModifiedOnly) && (
                 <button
                   onClick={() => {
                     setSearchTerm('');
                     setStatusFilter('all');
                     setSelectedTeamFilter('all');
                     setSelectedDate(getLocalDateString());
+                    setShowModifiedOnly(false);
                     setCurrentPage(1);
                   }}
                   className="flex items-center gap-2 px-4 py-2 text-sm bg-red-50 hover:bg-red-100 dark:bg-red-900/20 dark:hover:bg-red-900/40 text-red-600 dark:text-red-400 rounded-lg transition-colors"
@@ -1294,10 +1345,10 @@ export default function BotTransactionsPage() {
               <div className="overflow-x-auto">
                 <table className="w-full">
                   <thead>
-                                          <tr className="border-b border-gray-200 dark:border-gray-700">
-                        <th className="text-left py-3 px-4 font-semibold text-gray-900 dark:text-white">อัพเดทล่าสุด*</th>
-                        <th className="text-left py-3 px-4 font-semibold text-gray-900 dark:text-white">ID</th>
-                        <th className="text-left py-3 px-4 font-semibold text-gray-900 dark:text-white">Customer</th>
+                    <tr className="border-b border-gray-200 dark:border-gray-700">
+                      <th className="text-left py-3 px-4 font-semibold text-gray-900 dark:text-white">อัพเดทล่าสุด*</th>
+                      <th className="text-left py-3 px-4 font-semibold text-gray-900 dark:text-white">ID</th>
+                      <th className="text-left py-3 px-4 font-semibold text-gray-900 dark:text-white">Customer</th>
                       <th className="text-left py-3 px-4 font-semibold text-gray-900 dark:text-white">เว็บไซต์</th>
                       <th className="text-left py-3 px-4 font-semibold text-gray-900 dark:text-white">ธนาคาร</th>
                       <th className="text-left py-3 px-4 font-semibold text-gray-900 dark:text-white">เลขบัญชี</th>
@@ -1449,47 +1500,21 @@ export default function BotTransactionsPage() {
                         </div>
                       )}
                     </div>
-                    {/* Arrow */}
-                    <div className={`absolute ${index < 3 ? 'left-full top-3 border-4 border-transparent border-l-gray-900 dark:border-l-gray-700' : 'top-full right-4 border-4 border-transparent border-t-gray-900 dark:border-t-gray-700'}`}></div>
                   </div>
-                                </div>
-                              )}
+                </div>
+              )}
                             </div>
                           </td>
                           <td className="py-4 px-4 text-center">
-                            {['สำเร็จ', 'ยกเลิก', 'ล้มเหลว'].includes(transaction.status) ? (
-                              <span className="inline-flex items-center px-3 py-1.5 text-xs font-medium text-gray-400 dark:text-gray-500 bg-gray-100 dark:bg-gray-700 rounded-lg">
-                                <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                </svg>
-                                ปิดแล้ว
-                              </span>
-                            ) : isUser() ? (
-                              <span className="inline-flex items-center px-3 py-1.5 text-xs font-medium text-gray-400 dark:text-gray-500 bg-gray-100 dark:bg-gray-700 rounded-lg">
-                                <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728L5.636 5.636m12.728 12.728L18.364 5.636M5.636 18.364l12.728-12.728" />
-                                </svg>
-                                ไม่มีสิทธิ์
-                              </span>
+                            {isUser() ? (
+                              <span className="text-xs text-gray-400">ไม่มีสิทธิ์</span>
                             ) : (
                               <button
                                 onClick={() => openManageModal(transaction)}
                                 disabled={updatingStatus === transaction.id}
-                                className="inline-flex items-center px-3 py-1.5 text-xs font-medium text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/40 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                className="px-3 py-1.5 text-xs font-medium text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/40 rounded-lg disabled:opacity-50"
                               >
-                                {updatingStatus === transaction.id ? (
-                                  <>
-                                    <div className="animate-spin rounded-full h-3 w-3 border-2 border-blue-600 border-t-transparent mr-1"></div>
-                                    <span className="animate-pulse">อัพเดท...</span>
-                                  </>
-                                ) : (
-                                  <>
-                                    <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                                    </svg>
-                                    จัดการ
-                                  </>
-                                )}
+                                จัดการ
                               </button>
                             )}
                           </td>
