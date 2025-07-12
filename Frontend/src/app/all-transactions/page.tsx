@@ -1,26 +1,15 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { createPortal } from 'react-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useUserProfile } from '../../contexts/UserContext';
 import { usePermission } from '../../hooks/usePermission';
 import { useMultiTeam } from '../../hooks/useMultiTeam';
-import { collection, query, where, orderBy, getDocs, updateDoc, doc, limit, startAfter, Query, QuerySnapshot, DocumentData, addDoc, getDoc, runTransaction, serverTimestamp } from 'firebase/firestore';
+import { collection, query, where, orderBy, getDocs, limit, startAfter, Query, QuerySnapshot, DocumentData } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import DashboardLayout from '../../components/DashboardLayout';
 // Removed VirtualScrollTable import - now using regular HTML table
 import { toast } from 'react-hot-toast';
-
-// Portal Modal Component
-const PortalModal = ({ children, isOpen }: { children: React.ReactNode; isOpen: boolean }) => {
-  if (!isOpen) return null;
-  
-  return createPortal(
-    children,
-    document.body
-  );
-};
 
 interface BotTransaction {
   id: string;
@@ -46,12 +35,6 @@ interface BotTransaction {
   lastModifiedByEmail?: string;
   lastModifiedAt?: any;
 }
-
-const statusOptions = [
-  'รอโอน',
-  'สำเร็จ',
-  'ยกเลิก'
-];
 
 // Enhanced status configuration with better organization
 const statusConfig: { [key: string]: {
@@ -124,7 +107,6 @@ export default function BotTransactionsPage() {
   const [loading, setLoading] = useState(false); // เปลี่ยนจาก true เป็น false
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [updatingStatus, setUpdatingStatus] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [selectedTeamFilter, setSelectedTeamFilter] = useState<'all' | string>('all');
@@ -133,10 +115,6 @@ export default function BotTransactionsPage() {
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
   const [showAllData, setShowAllData] = useState(true);
   const [isDataLoaded, setIsDataLoaded] = useState(false); // เพิ่ม state เพื่อเช็คว่าข้อมูลถูกโหลดแล้วหรือไม่
-  const [showManageModal, setShowManageModal] = useState(false);
-  const [selectedTransaction, setSelectedTransaction] = useState<BotTransaction | null>(null);
-  const [modalStatus, setModalStatus] = useState('');
-  const [modalNote, setModalNote] = useState('');
 
   // Pagination states - Traditional pagination
   const [currentPage, setCurrentPage] = useState(1);
@@ -558,182 +536,7 @@ export default function BotTransactionsPage() {
 
   // Remove load all data function since we always show all data
 
-  const openManageModal = (transaction: BotTransaction) => {
-    setSelectedTransaction(transaction);
-    setModalStatus(''); // Set to empty string for default "-" option
-    setModalNote(transaction.note || '');
-    setShowManageModal(true);
-  };
 
-  const closeManageModal = () => {
-    setShowManageModal(false);
-    setSelectedTransaction(null);
-    setModalStatus('');
-    setModalNote('');
-  };
-
-  const updateTransactionStatus = async (transactionId: string, newStatus: string, note?: string) => {
-    try {
-      setUpdatingStatus(transactionId);
-
-              const updateData: any = {
-          status: newStatus,
-          updatedAt: new Date(),
-          lastModifiedBy: userProfile?.displayName || user?.displayName || 'ไม่ระบุผู้ใช้',
-          lastModifiedByEmail: user?.email || '',
-          lastModifiedAt: new Date()
-        };
-
-        if (note !== undefined) {
-          updateData.note = note;
-        }
-
-        await updateDoc(doc(db, 'transactions', transactionId), updateData);
-
-        // If status is "ยกเลิก", refund credit to website
-        if (newStatus === 'ยกเลิก') {
-          try {
-            // Find the transaction to get details for credit refund
-            const transaction = transactions.find(t => t.id === transactionId);
-            
-            if (transaction && transaction.websiteId) {
-              // Try to get document directly by ID first
-              const websiteDocRef = doc(db, 'websites', transaction.websiteId);
-              const websiteDocSnap = await getDoc(websiteDocRef);
-              
-              let websiteData = null;
-              let websiteDocId = null;
-              
-              if (websiteDocSnap.exists()) {
-                websiteData = websiteDocSnap.data();
-                websiteDocId = websiteDocSnap.id;
-              } else {
-                // If not found by document ID, try finding by id field
-                const websitesQuery = query(
-                  collection(db, 'websites'),
-                  where('id', '==', transaction.websiteId)
-                );
-                const websitesSnapshot = await getDocs(websitesQuery);
-                
-                if (!websitesSnapshot.empty) {
-                  websiteData = websitesSnapshot.docs[0].data();
-                  websiteDocId = websitesSnapshot.docs[0].id;
-                }
-              }
-              
-              if (websiteData && websiteDocId) {
-                // Use runTransaction to prevent race conditions with manual topup/withdraw
-                const refundResult = await runTransaction(db, async (firestoreTransaction) => {
-                  const websiteRef = doc(db, 'websites', websiteDocId);
-                  const websiteDoc = await firestoreTransaction.get(websiteRef);
-                  
-                  if (!websiteDoc.exists()) {
-                    throw new Error(`Website document not found: ${websiteDocId}`);
-                  }
-                  
-                  const currentData = websiteDoc.data();
-                  const currentBalance = currentData.balance || 0;
-                  const refundAmount = transaction.amount;
-                  const newBalance = currentBalance + refundAmount;
-
-                  // Update website balance atomically
-                  firestoreTransaction.update(websiteRef, {
-                    balance: newBalance,
-                    updatedAt: serverTimestamp()
-                  });
-
-                  return {
-                    currentBalance,
-                    newBalance,
-                    refundAmount,
-                    websiteName: transaction.websiteName
-                  };
-                });
-
-                // Create refund transaction record (outside of transaction for better performance)
-                const refundDoc = await addDoc(collection(db, 'transactions'), {
-                  transactionId: `REFUND_${Date.now()}`,
-                  type: 'refund',
-                  customerUsername: transaction.customerUsername,
-                  amount: refundResult.refundAmount,
-                  status: 'สำเร็จ',
-                  websiteName: transaction.websiteName,
-                  websiteId: transaction.websiteId,
-                  teamId: transaction.teamId,
-                  teamName: transaction.teamName,
-                  balanceBefore: refundResult.currentBalance,
-                  balanceAfter: refundResult.newBalance,
-                  relatedTransactionId: transactionId,
-                  note: `คืนเครดิตให้เว็บไซต์จากการยกเลิกธุรกรรม ${transaction.transactionId}`,
-                  createdAt: serverTimestamp(),
-                  updatedAt: serverTimestamp(),
-                  createdBy: userProfile?.displayName || user?.displayName || 'ระบบ',
-                  lastModifiedBy: userProfile?.displayName || user?.displayName || 'ระบบ',
-                  lastModifiedByEmail: user?.email || '',
-                  lastModifiedAt: serverTimestamp()
-                });
-
-                toast.success(`คืนเครดิต ฿${new Intl.NumberFormat('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(refundResult.refundAmount)} ให้เว็บไซต์ ${refundResult.websiteName} สำเร็จ`);
-              } else {
-                console.error(`Website not found: ${transaction.websiteName} (ID: ${transaction.websiteId})`);
-                toast.error(`ไม่พบเว็บไซต์: ${transaction.websiteName}`);
-              }
-            } else {
-              console.error('Transaction not found or missing websiteId:', transactionId);
-              toast.error('ไม่พบข้อมูลธุรกรรมหรือไม่มี websiteId');
-            }
-          } catch (refundError) {
-            console.error('Error refunding credit:', refundError);
-            toast.error('เกิดข้อผิดพลาดในการคืนเครดิต: ' + (refundError instanceof Error ? refundError.message : String(refundError)));
-          }
-        }
-
-        // Update local state
-        setTransactions(prev => 
-          prev.map(transaction => 
-            transaction.id === transactionId 
-              ? { 
-                  ...transaction, 
-                  status: newStatus, 
-                  note: note || transaction.note,
-                  lastModifiedBy: updateData.lastModifiedBy,
-                  lastModifiedByEmail: updateData.lastModifiedByEmail,
-                  lastModifiedAt: updateData.lastModifiedAt
-                }
-              : transaction
-          )
-        );
-
-      toast.success('อัพเดทข้อมูลสำเร็จ');
-      closeManageModal();
-    } catch (err) {
-      console.error('Error updating transaction:', err);
-      toast.error('ไม่สามารถอัพเดทข้อมูลได้');
-    } finally {
-      setUpdatingStatus(null);
-    }
-  };
-
-  const handleSaveChanges = () => {
-    if (selectedTransaction) {
-      // Use the selected status from modal
-      const finalStatus = modalStatus;
-      
-      // Validate that a status is selected
-      if (!modalStatus || modalStatus === '') {
-        toast.error('กรุณาเลือกสถานะ');
-        return;
-      }
-      
-      // Validate required note for certain statuses
-      if ((modalStatus === 'สำเร็จ' || modalStatus === 'ยกเลิก') && !modalNote.trim()) {
-        toast.error(`กรุณาใส่หมายเหตุสำหรับสถานะ "${modalStatus}"`);
-        return;
-      }
-      
-      updateTransactionStatus(selectedTransaction.id, finalStatus, modalNote);
-    }
-  };
 
   const formatDate = (timestamp: any) => {
     if (!timestamp) return '-';
@@ -1355,13 +1158,12 @@ export default function BotTransactionsPage() {
                       <th className="text-left py-3 px-4 font-semibold text-gray-900 dark:text-white w-40 max-w-40">ชื่อจริง</th>
                       <th className="text-center py-3 px-4 font-semibold text-gray-900 dark:text-white">จำนวนเงิน</th>
                       <th className="text-left py-3 px-4 font-semibold text-gray-900 dark:text-white">สถานะ</th>
-                      <th className="text-center py-3 px-4 font-semibold text-gray-900 dark:text-white">การจัดการ</th>
                     </tr>
                   </thead>
                   <tbody>
                     {(loading || refreshing) && transactions.length === 0 ? (
                       <tr>
-                        <td colSpan={10} className="py-16 text-center">
+                        <td colSpan={9} className="py-16 text-center">
                           <div className="flex flex-col items-center justify-center animate-fade-in">
                             <div className="relative mb-4">
                               <div className="animate-spin rounded-full h-12 w-12 border-4 border-blue-200 border-t-blue-600 dark:border-gray-600 dark:border-t-blue-400"></div>
@@ -1386,7 +1188,7 @@ export default function BotTransactionsPage() {
                       </tr>
                     ) : teams.length === 0 && !teamsLoading ? (
                       <tr>
-                        <td colSpan={10} className="py-16 text-center">
+                        <td colSpan={9} className="py-16 text-center">
                           <div className="text-gray-500 dark:text-gray-400 animate-fade-in">
                             <svg className="h-12 w-12 mx-auto mb-2 opacity-50 animate-bounce" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 715.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
@@ -1398,7 +1200,7 @@ export default function BotTransactionsPage() {
                       </tr>
                     ) : filteredTransactions.length === 0 ? (
                       <tr>
-                        <td colSpan={10} className="py-16 text-center">
+                        <td colSpan={9} className="py-16 text-center">
                           <div className="text-gray-500 dark:text-gray-400 animate-fade-in">
                             <svg className="h-12 w-12 mx-auto mb-2 opacity-50 animate-bounce" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
@@ -1505,19 +1307,7 @@ export default function BotTransactionsPage() {
               )}
                             </div>
                           </td>
-                          <td className="py-4 px-4 text-center">
-                            {isUser() ? (
-                              <span className="text-xs text-gray-400">ไม่มีสิทธิ์</span>
-                            ) : (
-                              <button
-                                onClick={() => openManageModal(transaction)}
-                                disabled={updatingStatus === transaction.id}
-                                className="px-3 py-1.5 text-xs font-medium text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/40 rounded-lg disabled:opacity-50"
-                              >
-                                จัดการ
-                              </button>
-                            )}
-                          </td>
+
                         </tr>
                       ))
                     )}
@@ -1617,132 +1407,7 @@ export default function BotTransactionsPage() {
           )}
         </div>
 
-        {/* Manage Transaction Modal */}
-        <PortalModal isOpen={showManageModal && !!selectedTransaction}>
-          <div className="fixed inset-0 bg-black/70 backdrop-blur-xl flex items-center justify-center p-4 z-[100] animate-fade-in">
-            <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl border border-white/20 dark:border-gray-700/50 max-w-md w-full max-h-[90vh] overflow-y-auto transform transition-all duration-300 scale-95 animate-fade-in" style={{ animationDelay: '0.1s', transform: 'scale(1)' }}>
-              <div className="p-6">
-                {/* Modal Header */}
-                <div className="flex items-center justify-between mb-6 animate-fade-in-delay">
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-                    จัดการธุรกรรม
-                  </h3>
-                  <button
-                    onClick={closeManageModal}
-                    className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors hover:scale-110 transform duration-200"
-                  >
-                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
-                </div>
 
-                {selectedTransaction && (
-                  <>
-                    {/* Transaction Info */}
-                    <div className="mb-6 p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
-                      <div className="space-y-2 text-sm">
-                        <div className="flex justify-between">
-                          <span className="text-gray-600 dark:text-gray-400">Transaction ID:</span>
-                          <span className="font-mono text-blue-600 dark:text-blue-400">{selectedTransaction.transactionId}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-gray-600 dark:text-gray-400">Customer:</span>
-                          <span className="font-medium">{selectedTransaction.customerUsername}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-gray-600 dark:text-gray-400">จำนวนเงิน:</span>
-                          <span className="font-bold text-red-600 dark:text-red-400">-฿{formatAmount(selectedTransaction.amount)}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-gray-600 dark:text-gray-400">เว็บไซต์:</span>
-                          <span className="font-medium">{selectedTransaction.websiteName}</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Status Selection */}
-                    <div className="mb-4">
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                        สถานะ
-                      </label>
-                      <select
-                        value={modalStatus}
-                        onChange={(e) => setModalStatus(e.target.value)}
-                        className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white ${
-                          !modalStatus ? 'border-red-300 dark:border-red-600' : 'border-gray-300 dark:border-gray-600'
-                        }`}
-                      >
-                        <option value="" disabled>
-                          - เลือกสถานะ -
-                        </option>
-                        {statusOptions.map(status => (
-                          <option key={status} value={status}>
-                            {status}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    {/* Note Input */}
-                    <div className="mb-6">
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                        หมายเหตุ
-                        {(modalStatus === 'สำเร็จ' || modalStatus === 'ยกเลิก') && (
-                          <span className="text-red-500 ml-1">*</span>
-                        )}
-                      </label>
-                      {(modalStatus === 'สำเร็จ' || modalStatus === 'ยกเลิก') && (
-                        <p className="text-xs text-red-600 dark:text-red-400 mb-2">
-                          กรุณาใส่หมายเหตุสำหรับสถานะ "{modalStatus}"
-                        </p>
-                      )}
-                      <textarea
-                        value={modalNote}
-                        onChange={(e) => setModalNote(e.target.value)}
-                        rows={3}
-                        className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white resize-none ${
-                          (modalStatus === 'สำเร็จ' || modalStatus === 'ยกเลิก') && !modalNote.trim()
-                            ? 'border-red-300 dark:border-red-600'
-                            : 'border-gray-300 dark:border-gray-600'
-                        }`}
-                        placeholder={
-                          (modalStatus === 'สำเร็จ' || modalStatus === 'ยกเลิก')
-                            ? `กรุณาใส่เหตุผลสำหรับสถานะ "${modalStatus}"...`
-                            : "เพิ่มหมายเหตุสำหรับธุรกรรมนี้..."
-                        }
-                      />
-                    </div>
-
-                    {/* Modal Actions */}
-                    <div className="flex gap-3">
-                      <button
-                        onClick={closeManageModal}
-                        className="flex-1 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition-colors"
-                      >
-                        ยกเลิก
-                      </button>
-                      <button
-                        onClick={handleSaveChanges}
-                        disabled={updatingStatus === selectedTransaction.id || !modalStatus}
-                        className="flex-1 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 rounded-lg transition-colors disabled:cursor-not-allowed"
-                      >
-                        {updatingStatus === selectedTransaction.id ? (
-                          <div className="flex items-center justify-center">
-                            <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent mr-2"></div>
-                            <span className="animate-pulse">กำลังบันทึก...</span>
-                          </div>
-                        ) : (
-                          'บันทึกการเปลี่ยนแปลง'
-                        )}
-                      </button> 
-                    </div>
-                  </>
-                )}
-              </div>
-            </div>
-          </div>
-        </PortalModal>
       </div>
     </DashboardLayout>
   );
