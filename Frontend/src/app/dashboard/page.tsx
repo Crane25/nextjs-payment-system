@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import DashboardLayout from '../../components/DashboardLayout';
 import { 
@@ -80,6 +80,12 @@ export default function Dashboard() {
     totalBalance: false,
     websiteBalances: {} as Record<string, boolean>
   });
+
+  // เพิ่ม state เพื่อป้องกันการโหลดข้อมูลซ้ำซ้อน
+  const [isLoadingRef, setIsLoadingRef] = useState(false);
+  
+  // เพิ่ม debounce timer สำหรับ real-time updates
+  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Website Management State
   const [websites, setWebsites] = useState<any[]>([]);
@@ -191,7 +197,15 @@ export default function Dashboard() {
   const loadDashboardData = useCallback(async (forceRefresh = false) => {
     if (!user || !userProfile) return;
     
+    // ป้องกันการโหลดข้อมูลซ้ำซ้อน
+    if (isLoadingRef && !forceRefresh) {
+      console.log('Dashboard data is already loading, skipping...');
+      return;
+    }
+    
     try {
+      setIsLoadingRef(true);
+      
       if (forceRefresh || !refreshing) {
         setLoading(true);
       } else {
@@ -246,8 +260,9 @@ export default function Dashboard() {
     } finally {
       setLoading(false);
       setRefreshing(false);
+      setIsLoadingRef(false);
     }
-  }, [user?.uid, teams, userProfile?.role, refreshing]);
+  }, [user?.uid, teams, userProfile?.role, refreshing, isLoadingRef]);
 
   // Force refresh function - แทนที่ handleRefreshWebsites
   const handleRefreshDashboard = useCallback(async () => {
@@ -316,36 +331,81 @@ export default function Dashboard() {
           });
 
           if (relevantChanges.length > 0) {
-            // Clear cache and reload data for real-time updates
-            dashboardDataManager.clearCache('websites');
-            dashboardDataManager.clearUserCache(user.uid);
+            // อัพเดท state แบบ incremental แทนการโหลดข้อมูลใหม่ทั้งหมด
+            relevantChanges.forEach(change => {
+              const data = change.doc.data();
+              const websiteId = change.doc.id;
+              
+              if (change.type === 'added') {
+                // เพิ่มเว็บไซต์ใหม่
+                setWebsites(prev => {
+                  // ตรวจสอบว่ามีเว็บไซต์นี้อยู่แล้วหรือไม่
+                  if (prev.some(w => w.id === websiteId)) return prev;
+                  
+                  const newWebsite = {
+                    id: websiteId,
+                    ...data,
+                    teamName: data.teamId ? teams.find(t => t.id === data.teamId)?.name || 'ไม่ระบุทีม' : null
+                  };
+                  return [...prev, newWebsite];
+                });
+                
+                toast.success(`เพิ่มเว็บไซต์ใหม่: ${data.name}`, {
+                  duration: 3000,
+                  position: 'top-right',
+                });
+              }
+              
+              else if (change.type === 'modified') {
+                // อัพเดทข้อมูลเว็บไซต์ที่มีอยู่
+                setWebsites(prev => 
+                  prev.map(w => 
+                    w.id === websiteId 
+                      ? { 
+                          ...w, 
+                          ...data,
+                          teamName: data.teamId ? teams.find(t => t.id === data.teamId)?.name || 'ไม่ระบุทีม' : null
+                        }
+                      : w
+                  )
+                );
+                
+                // Trigger animation for balance update
+                if (data.balance !== undefined) {
+                  triggerAnimation('totalBalance', websiteId);
+                }
+                
+                toast.success(`อัพเดท: ${data.name}`, {
+                  duration: 2000,
+                  position: 'top-right',
+                });
+              }
+              
+              else if (change.type === 'removed') {
+                // ลบเว็บไซต์
+                setWebsites(prev => prev.filter(w => w.id !== websiteId));
+                
+                toast.success(`ลบเว็บไซต์: ${data.name}`, {
+                  duration: 3000,
+                  position: 'top-right',
+                });
+              }
+            });
             
-            // Reload dashboard data
-            loadDashboardData(true);
+            // อัพเดท stats โดยไม่ต้องโหลดข้อมูลใหม่
+            setStats(prevStats => {
+              const newTotalBalance = websites.reduce((sum, site) => sum + (site.balance || 0), 0);
+              const totalDailyTopup = websites.reduce((sum, site) => sum + (site.dailyTopup || 0), 0);
+              
+              return {
+                totalBalance: newTotalBalance,
+                monthlyIncome: totalDailyTopup * 30,
+                monthlyExpense: newTotalBalance * 0.1,
+                savings: newTotalBalance * 0.8
+              };
+            });
             
-            // Show notification for different types of changes
-            const addedCount = relevantChanges.filter(c => c.type === 'added').length;
-            const modifiedCount = relevantChanges.filter(c => c.type === 'modified').length;
-            const removedCount = relevantChanges.filter(c => c.type === 'removed').length;
-            
-            if (addedCount > 0) {
-              toast.success(`มีเว็บไซต์ใหม่ ${addedCount} เว็บไซต์`, {
-                duration: 3000,
-                position: 'top-right',
-              });
-            }
-            if (modifiedCount > 0) {
-              toast.success(`มีการอัพเดทข้อมูล ${modifiedCount} เว็บไซต์`, {
-                duration: 3000,
-                position: 'top-right',
-              });
-            }
-            if (removedCount > 0) {
-              toast.success(`มีการลบ ${removedCount} เว็บไซต์`, {
-                duration: 3000,
-                position: 'top-right',
-              });
-            }
+            setLastUpdated(new Date());
           }
           
           setTimeout(() => setIsRealTimeActive(false), 2000);
@@ -354,6 +414,11 @@ export default function Dashboard() {
       (error) => {
         console.error('Real-time listener error:', error);
         setIsRealTimeActive(false);
+        
+        // หากเกิดข้อผิดพลาด ให้โหลดข้อมูลใหม่เพียงครั้งเดียว
+        setTimeout(() => {
+          loadDashboardData(true);
+        }, 5000);
       }
     );
 
@@ -362,7 +427,7 @@ export default function Dashboard() {
         websiteUnsubscribe();
       }
     };
-  }, [user, userProfile, teams, loadDashboardData]);
+  }, [user?.uid, userProfile?.role, teams, triggerAnimation]);
 
   // Real-time listener for topup history changes
   useEffect(() => {
@@ -374,7 +439,7 @@ export default function Dashboard() {
     // Set up real-time listener for topupHistory collection
     const topupHistoryRef = collection(db, 'topupHistory');
     topupUnsubscribe = onSnapshot(
-      query(topupHistoryRef, orderBy('timestamp', 'desc')),
+      query(topupHistoryRef, orderBy('timestamp', 'desc'), limit(50)),
       (snapshot) => {
         // Skip initial load to avoid duplicate data
         if (isInitialLoad) {
@@ -399,18 +464,15 @@ export default function Dashboard() {
           });
 
           if (relevantNewRecords.length > 0) {
-            // Clear cache and update data
-            dashboardDataManager.clearCache('topupHistory');
-            dashboardDataManager.clearUserCache(user.uid);
-            
             // Update today's topup amount directly for immediate UI response
             const today = new Date().toDateString();
             let newTodayAmount = 0;
             const newWebsiteTopupMap: Record<string, number> = {};
+            const websiteBalanceUpdates: Record<string, number> = {};
             
             relevantNewRecords.forEach(change => {
               const data = change.doc.data();
-              const recordDate = new Date(data.timestamp);
+              const recordDate = data.timestamp?.toDate?.() || new Date(data.timestamp);
               
               // Check if record is from today
               if (recordDate.toDateString() === today) {
@@ -422,6 +484,7 @@ export default function Dashboard() {
                 // Track per website
                 if (websiteId) {
                   newWebsiteTopupMap[websiteId] = (newWebsiteTopupMap[websiteId] || 0) + amount;
+                  websiteBalanceUpdates[websiteId] = amount; // เพื่ออัพเดทยอดคงเหลือ
                 }
               }
             });
@@ -437,15 +500,35 @@ export default function Dashboard() {
                 return updated;
               });
               
+              // อัพเดทยอดคงเหลือของเว็บไซต์ที่เกี่ยวข้อง
+              setWebsites(prev => 
+                prev.map(w => {
+                  if (websiteBalanceUpdates[w.id]) {
+                    const newBalance = (w.balance || 0) + websiteBalanceUpdates[w.id];
+                    triggerAnimation('totalBalance', w.id);
+                    return { ...w, balance: newBalance };
+                  }
+                  return w;
+                })
+              );
+              
+              // อัพเดท total stats
+              setStats(prev => ({
+                ...prev,
+                totalBalance: prev.totalBalance + newTodayAmount
+              }));
+              
               // Trigger animation for topup amount
               triggerAnimation('todayTopup');
               
               // Show notification
-              toast.success(`เงินเข้าใหม่ ${newTodayAmount.toLocaleString()} บาท`, {
+              toast.success(`เงินเข้าใหม่ ฿${newTodayAmount.toLocaleString()}`, {
                 duration: 4000,
                 position: 'top-right',
               });
             }
+            
+            setLastUpdated(new Date());
           }
           
           setTimeout(() => setIsRealTimeActive(false), 2000);
@@ -462,7 +545,7 @@ export default function Dashboard() {
         topupUnsubscribe();
       }
     };
-  }, [user, userProfile, teams, triggerAnimation]);
+  }, [user?.uid, userProfile?.role, teams, triggerAnimation]);
 
   // Real-time listener for withdraw history changes
   useEffect(() => {
@@ -474,7 +557,7 @@ export default function Dashboard() {
     // Set up real-time listener for withdrawHistory collection
     const withdrawHistoryRef = collection(db, 'withdrawHistory');
     withdrawUnsubscribe = onSnapshot(
-      query(withdrawHistoryRef, orderBy('timestamp', 'desc')),
+      query(withdrawHistoryRef, orderBy('timestamp', 'desc'), limit(50)),
       (snapshot) => {
         // Skip initial load to avoid duplicate data
         if (isInitialLoad) {
@@ -499,18 +582,15 @@ export default function Dashboard() {
           });
 
           if (relevantNewRecords.length > 0) {
-            // Clear cache and update data
-            dashboardDataManager.clearCache('withdrawHistory');
-            dashboardDataManager.clearUserCache(user.uid);
-            
             // Update today's withdraw amount directly for immediate UI response
             const today = new Date().toDateString();
             let newTodayAmount = 0;
             const newWebsiteWithdrawMap: Record<string, number> = {};
+            const websiteBalanceUpdates: Record<string, number> = {};
             
             relevantNewRecords.forEach(change => {
               const data = change.doc.data();
-              const recordDate = new Date(data.timestamp);
+              const recordDate = data.timestamp?.toDate?.() || new Date(data.timestamp);
               
               // Check if record is from today
               if (recordDate.toDateString() === today) {
@@ -522,6 +602,7 @@ export default function Dashboard() {
                 // Track per website
                 if (websiteId) {
                   newWebsiteWithdrawMap[websiteId] = (newWebsiteWithdrawMap[websiteId] || 0) + amount;
+                  websiteBalanceUpdates[websiteId] = amount; // เพื่ออัพเดทยอดคงเหลือ
                 }
               }
             });
@@ -537,15 +618,35 @@ export default function Dashboard() {
                 return updated;
               });
               
+              // อัพเดทยอดคงเหลือของเว็บไซต์ที่เกี่ยวข้อง
+              setWebsites(prev => 
+                prev.map(w => {
+                  if (websiteBalanceUpdates[w.id]) {
+                    const newBalance = (w.balance || 0) - websiteBalanceUpdates[w.id];
+                    triggerAnimation('totalBalance', w.id);
+                    return { ...w, balance: Math.max(0, newBalance) }; // ป้องกันยอดติดลบ
+                  }
+                  return w;
+                })
+              );
+              
+              // อัพเดท total stats
+              setStats(prev => ({
+                ...prev,
+                totalBalance: Math.max(0, prev.totalBalance - newTodayAmount) // ป้องกันยอดติดลบ
+              }));
+              
               // Trigger animation for withdraw amount
               triggerAnimation('todayWithdraw');
               
               // Show notification
-              toast.success(`เงินออกใหม่ ${newTodayAmount.toLocaleString()} บาท`, {
+              toast.success(`เงินออกใหม่ ฿${newTodayAmount.toLocaleString()}`, {
                 duration: 4000,
                 position: 'top-right',
               });
             }
+            
+            setLastUpdated(new Date());
           }
           
           setTimeout(() => setIsRealTimeActive(false), 2000);
@@ -562,7 +663,7 @@ export default function Dashboard() {
         withdrawUnsubscribe();
       }
     };
-  }, [user, userProfile, teams, triggerAnimation]);
+  }, [user?.uid, userProfile?.role, teams, triggerAnimation]);
 
   const toggleWebsiteStatus = async (id: string) => {
     if (!user) return;
@@ -641,6 +742,11 @@ export default function Dashboard() {
         return;
       }
       
+      if (!newWebsite.apiKey.trim()) {
+        toast.error('กรุณากรอก API Key');
+        return;
+      }
+      
       // URL validation
       try {
         new URL(newWebsite.url);
@@ -648,9 +754,6 @@ export default function Dashboard() {
         toast.error('กรุณากรอก URL ให้ถูกต้อง');
         return;
       }
-      
-      // Generate API key
-      const apiKey = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
       
       // เก็บใน main websites collection
       const websitesRef = collection(db, 'websites');
@@ -661,7 +764,7 @@ export default function Dashboard() {
         balance: 0,
         dailyTopup: 0,
         isActive: true,
-        apiKey: apiKey,
+        apiKey: newWebsite.apiKey.trim(),
         createdAt: serverTimestamp(),
         lastUpdated: serverTimestamp(),
         userId: user?.uid,
@@ -962,17 +1065,16 @@ export default function Dashboard() {
       triggerAnimation('totalBalance', websiteId);
       triggerAnimation('todayTopup');
       
-      // โหลดข้อมูลใหม่ในภายหลังโดยไม่ clear cache ทั้งหมด
-      // เพื่อให้ยอดเติมวันนี้ไม่หายไป
-      setTimeout(async () => {
-        // Clear เฉพาะ cache ที่เกี่ยวข้องกับ topup
-        dashboardDataManager.clearCache('topupHistory');
-        dashboardDataManager.clearCache('websites');
-        dashboardDataManager.clearUserCache(user.uid);
-        
-        // รีเฟรชข้อมูลใหม่
-        await loadDashboardData(true);
-      }, 1000);
+      // Real-time listeners จะจัดการอัพเดทข้อมูลให้เอง ไม่ต้องโหลดใหม่
+      // setTimeout(async () => {
+      //   // Clear เฉพาะ cache ที่เกี่ยวข้องกับ topup
+      //   dashboardDataManager.clearCache('topupHistory');
+      //   dashboardDataManager.clearCache('websites');
+      //   dashboardDataManager.clearUserCache(user.uid);
+      //   
+      //   // รีเฟรชข้อมูลใหม่
+      //   await loadDashboardData(true);
+      // }, 1000);
       
     } catch (error: any) {
       console.error('Error executing topup:', error);
@@ -1164,17 +1266,16 @@ export default function Dashboard() {
       triggerAnimation('totalBalance', websiteId);
       triggerAnimation('todayWithdraw');
       
-      // โหลดข้อมูลใหม่ในภายหลังโดยไม่ clear cache ทั้งหมด
-      // เพื่อให้ยอดเติมวันนี้ไม่หายไป
-      setTimeout(async () => {
-        // Clear เฉพาะ cache ที่เกี่ยวข้องกับ withdraw
-        dashboardDataManager.clearCache('withdrawHistory');
-        dashboardDataManager.clearCache('websites');
-        dashboardDataManager.clearUserCache(user.uid);
-        
-        // รีเฟรชข้อมูลใหม่
-        await loadDashboardData(true);
-      }, 1000);
+      // Real-time listeners จะจัดการอัพเดทข้อมูลให้เอง ไม่ต้องโหลดใหม่
+      // setTimeout(async () => {
+      //   // Clear เฉพาะ cache ที่เกี่ยวข้องกับ withdraw
+      //   dashboardDataManager.clearCache('withdrawHistory');
+      //   dashboardDataManager.clearCache('websites');
+      //   dashboardDataManager.clearUserCache(user.uid);
+      //   
+      //   // รีเฟรชข้อมูลใหม่
+      //   await loadDashboardData(true);
+      // }, 1000);
       
     } catch (error: any) {
       console.error('Error executing withdraw:', error);
@@ -1280,6 +1381,36 @@ export default function Dashboard() {
     );
   }
 
+  // Debounced function สำหรับ real-time updates
+  const debouncedStatsUpdate = useCallback(() => {
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+    
+    debounceTimerRef.current = setTimeout(() => {
+      setStats(prevStats => {
+        const newTotalBalance = websites.reduce((sum, site) => sum + (site.balance || 0), 0);
+        const totalDailyTopup = websites.reduce((sum, site) => sum + (site.dailyTopup || 0), 0);
+        
+        return {
+          totalBalance: newTotalBalance,
+          monthlyIncome: totalDailyTopup * 30,
+          monthlyExpense: newTotalBalance * 0.1,
+          savings: newTotalBalance * 0.8
+        };
+      });
+    }, 500); // รอ 500ms ก่อนอัพเดท stats
+  }, [websites]);
+
+  // Cleanup debounce timer
+  useEffect(() => {
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+    };
+  }, []);
+
   return (
     <DashboardLayout 
       title="แดชบอร์ด" 
@@ -1287,22 +1418,129 @@ export default function Dashboard() {
     >
       <style jsx>{`
         .amount-update {
-          animation: redFadeOut 2s ease-out;
+          animation: professionalUpdate 2s ease-out;
         }
         
-        @keyframes redFadeOut {
+        @keyframes professionalUpdate {
           0% {
-            color: #ef4444 !important;
-            text-shadow: 0 0 10px rgba(239, 68, 68, 0.5);
+            transform: scale(1);
+            box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.4);
+          }
+          25% {
+            transform: scale(1.05);
+            box-shadow: 0 0 0 8px rgba(59, 130, 246, 0.2);
           }
           50% {
-            color: #dc2626 !important;
-            text-shadow: 0 0 8px rgba(220, 38, 38, 0.4);
+            transform: scale(1.08);
+            box-shadow: 0 0 0 12px rgba(59, 130, 246, 0.1);
+          }
+          75% {
+            transform: scale(1.03);
+            box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.05);
           }
           100% {
-            color: inherit;
-            text-shadow: none;
+            transform: scale(1);
+            box-shadow: 0 0 0 0 rgba(59, 130, 246, 0);
           }
+        }
+        
+        .amount-update-green {
+          animation: professionalUpdateGreen 2s ease-out;
+        }
+        
+        @keyframes professionalUpdateGreen {
+          0% {
+            transform: scale(1);
+            box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4);
+          }
+          25% {
+            transform: scale(1.05);
+            box-shadow: 0 0 0 8px rgba(34, 197, 94, 0.2);
+          }
+          50% {
+            transform: scale(1.08);
+            box-shadow: 0 0 0 12px rgba(34, 197, 94, 0.1);
+          }
+          75% {
+            transform: scale(1.03);
+            box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.05);
+          }
+          100% {
+            transform: scale(1);
+            box-shadow: 0 0 0 0 rgba(34, 197, 94, 0);
+          }
+        }
+        
+        .amount-update-orange {
+          animation: professionalUpdateOrange 2s ease-out;
+        }
+        
+        @keyframes professionalUpdateOrange {
+          0% {
+            transform: scale(1);
+            box-shadow: 0 0 0 0 rgba(249, 115, 22, 0.4);
+          }
+          25% {
+            transform: scale(1.05);
+            box-shadow: 0 0 0 8px rgba(249, 115, 22, 0.2);
+          }
+          50% {
+            transform: scale(1.08);
+            box-shadow: 0 0 0 12px rgba(249, 115, 22, 0.1);
+          }
+          75% {
+            transform: scale(1.03);
+            box-shadow: 0 0 0 4px rgba(249, 115, 22, 0.05);
+          }
+          100% {
+            transform: scale(1);
+            box-shadow: 0 0 0 0 rgba(249, 115, 22, 0);
+          }
+        }
+        
+        /* Clean and professional amount container */
+        .amount-container {
+          position: relative;
+          display: inline-block;
+          transition: all 0.3s ease;
+          border-radius: 6px;
+          padding: 2px 4px;
+        }
+        
+        .amount-container:hover {
+          transform: translateY(-1px);
+        }
+        
+        /* Professional stat card styling */
+        .stat-card {
+          position: relative;
+          overflow: hidden;
+          transition: all 0.3s ease;
+        }
+        
+        .stat-card:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
+        }
+        
+        .stat-card::before {
+          content: '';
+          position: absolute;
+          top: 0;
+          left: -100%;
+          width: 100%;
+          height: 100%;
+          background: linear-gradient(
+            90deg,
+            transparent,
+            rgba(255, 255, 255, 0.1),
+            transparent
+          );
+          transition: left 0.6s ease;
+        }
+        
+        .stat-card:hover::before {
+          left: 100%;
         }
       `}</style>
       <div className="space-y-6 lg:space-y-8">
@@ -1311,20 +1549,22 @@ export default function Dashboard() {
           {statCards.map((stat, index) => {
             // Determine animation class based on card type
             let animationClass = '';
-            if (index === 0 && animationState.totalBalance) animationClass = 'amount-update';
-            if (index === 1 && animationState.todayTopup) animationClass = 'amount-update';
-            if (index === 2 && animationState.todayWithdraw) animationClass = 'amount-update';
+            if (index === 0 && animationState.totalBalance) animationClass = 'amount-update-green'; // ยอดเงินคงเหลือ - สีเขียว
+            if (index === 1 && animationState.todayTopup) animationClass = 'amount-update'; // ยอดเติมวันนี้ - สีน้ำเงิน
+            if (index === 2 && animationState.todayWithdraw) animationClass = 'amount-update-orange'; // ยอดถอนวันนี้ - สีส้ม
             
             return (
-              <div key={index} className={`bg-gradient-to-r ${stat.color} rounded-2xl p-6 text-white`}>
+              <div key={index} className={`stat-card bg-gradient-to-r ${stat.color} rounded-2xl p-6 text-white`}>
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-white/80 text-sm font-medium">
                       {stat.title}
                     </p>
-                    <p className={`text-2xl font-bold ${animationClass}`}>
-                      {stat.value}
-                    </p>
+                    <div className="amount-container">
+                      <p className={`text-2xl font-bold ${animationClass}`}>
+                        {stat.value}
+                      </p>
+                    </div>
                   </div>
                   <stat.icon className="h-8 w-8 text-white/60" />
                 </div>
@@ -1494,7 +1734,7 @@ export default function Dashboard() {
                       </tr>
                       {/* Team Websites */}
                       {teamWebsites.map((website: any) => (
-                        <tr key={website.id} className="border-b border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors duration-200">
+                        <tr key={website.id} data-website-id={website.id} className="border-b border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors duration-200">
                           <td className="py-4 px-4">
                             <div className="font-semibold text-gray-900 dark:text-white">{website.name}</div>
                           </td>
@@ -1533,10 +1773,14 @@ export default function Dashboard() {
                             </div>
                           </td>
                           <td className="py-4 px-4 text-center">
-                            <div className={`font-bold text-green-600 dark:text-green-400 ${animationState.websiteBalances[website.id] ? 'amount-update' : ''}`}>฿{(website.balance || 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                            <div className="amount-container">
+                              <div className={`font-bold text-green-600 dark:text-green-400 ${animationState.websiteBalances[website.id] ? 'amount-update-green' : ''}`}>฿{(website.balance || 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                            </div>
                           </td>
                           <td className="py-4 px-4 text-center">
-                            <div className={`font-bold text-blue-600 dark:text-blue-400 ${animationState.websiteBalances[website.id] ? 'amount-update' : ''}`}>฿{(todayTopupByWebsite[website.id] || 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                            <div className="amount-container">
+                              <div className={`font-bold text-blue-600 dark:text-blue-400 ${animationState.websiteBalances[website.id] ? 'amount-update' : ''}`}>฿{(todayTopupByWebsite[website.id] || 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                            </div>
                           </td>
                           <td className="py-4 px-4 text-center">
                             <div className="flex items-center justify-center">
